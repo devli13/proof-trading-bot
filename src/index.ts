@@ -2,12 +2,16 @@ import { loadConfig } from "./config";
 import { createLogger } from "./logger";
 import { runSmoke } from "./smoke";
 import { runBot } from "./runner";
+import { walletCommand, fundCommand } from "./commands";
 import { NoopStrategy } from "./strategy/noop";
 
 /**
  * CLI entry.
- *   pnpm smoke   → one-shot devnet smoke test (connect, read, place+cancel)
- *   pnpm run     → long-lived strategy loop (the NoopStrategy by default)
+ *   pnpm wallet       → show the current devnet wallet (generates one if none)
+ *   pnpm wallet:new   → generate a fresh keypair into the keystore
+ *   pnpm fund         → drip the devnet faucet into the wallet (needs token)
+ *   pnpm smoke        → one-shot devnet smoke test (connect, read, place+cancel)
+ *   pnpm run          → long-lived strategy loop (NoopStrategy by default)
  */
 async function main(): Promise<void> {
   const cmd = process.argv[2] ?? "smoke";
@@ -15,6 +19,14 @@ async function main(): Promise<void> {
   const logger = createLogger(config.logLevel);
 
   switch (cmd) {
+    case "wallet": {
+      const fresh = process.argv[3] === "new" || process.argv.includes("--new");
+      await walletCommand(config, logger, fresh);
+      break;
+    }
+    case "fund":
+      await fundCommand(config, logger);
+      break;
     case "smoke":
       await runSmoke(config, logger);
       break;
@@ -22,7 +34,7 @@ async function main(): Promise<void> {
       await runBot(config, logger, new NoopStrategy());
       break;
     default:
-      logger.error(`unknown command "${cmd}" — use: smoke | run`);
+      logger.error(`unknown command "${cmd}" — use: wallet | fund | smoke | run`);
       process.exit(1);
   }
 }

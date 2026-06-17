@@ -69,6 +69,14 @@ export async function loadWallet(config: Config, logger: Logger): Promise<Wallet
   }
 
   logger.warn("wallet: no key configured — generating a new (unfunded) keypair");
+  return generateWallet(config, logger);
+}
+
+/** Generate a brand-new Ed25519 keypair and persist it to the keystore. */
+export async function generateWallet(
+  config: Config,
+  logger: Logger,
+): Promise<Wallet> {
   const { publicKey, privateKey } = generateKeypair();
   const address = pubkeyToOwner(publicKey);
   const addressHex = ownerToHex(address);

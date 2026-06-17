@@ -10,6 +10,9 @@
   "scripts": {
     "build:sdk": "node scripts/build-sdk.mjs",
     "postinstall": "node scripts/build-sdk.mjs",
+    "wallet": "tsx src/index.ts wallet",
+    "wallet:new": "tsx src/index.ts wallet new",
+    "fund": "tsx src/index.ts fund",
     "smoke": "tsx src/index.ts smoke",
     "run": "tsx src/index.ts run",
     "start": "tsx src/index.ts run",
