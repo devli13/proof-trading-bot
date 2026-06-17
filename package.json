@@ -1,0 +1,39 @@
+{
+  "name": "proof-trading-bot",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Experimental trading bot for Proof Exchange impact markets — binary event prediction on perps. Runs locally as a long-lived loop or on Vercel Cron as a serverless tick.",
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "build:sdk": "node scripts/build-sdk.mjs",
+    "postinstall": "node scripts/build-sdk.mjs",
+    "smoke": "tsx src/index.ts smoke",
+    "run": "tsx src/index.ts run",
+    "start": "tsx src/index.ts run",
+    "dev": "tsx watch src/index.ts run",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "format": "prettier --write ."
+  },
+  "dependencies": {
+    "@proof/trading-sdk": "link:./vendor/trading-sdk",
+    "pino": "^9.5.0",
+    "pino-pretty": "^13.0.0",
+    "zod": "^3.23.8"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "@vercel/node": "^5.0.0",
+    "prettier": "^3.4.2",
+    "tsx": "^4.19.2",
+    "typescript": "^6.0.0",
+    "vitest": "^4.0.0"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": ["esbuild"]
+  }
+}

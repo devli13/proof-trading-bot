@@ -1,0 +1,19 @@
+# dependencies
+node_modules/
+
+# build output
+dist/
+.vercel/
+
+# secrets & wallet keys — NEVER commit
+.env
+.env.local
+.env.*.local
+.keys/
+*.key
+
+# logs
+*.log
+
+# os
+.DS_Store
