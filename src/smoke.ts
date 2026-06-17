@@ -4,12 +4,12 @@ import {
   placeLimitOrder,
   cancelAllOrders,
   queryAccountSafe,
-} from "./client";
-import { loadWallet } from "./wallet";
-import { requestFaucetDrip } from "./faucet";
-import { formatCents, formatMicroUsdc } from "./units";
-import type { Config } from "./config";
-import type { Logger } from "./logger";
+} from "./client.js";
+import { loadWallet } from "./wallet.js";
+import { requestFaucetDrip } from "./faucet.js";
+import { formatCents, formatMicroUsdc } from "./units.js";
+import type { Config } from "./config.js";
+import type { Logger } from "./logger.js";
 
 const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms));
 
@@ -43,25 +43,28 @@ export async function runSmoke(config: Config, logger: Logger): Promise<void> {
   client.setPrivateKey(wallet.privateKey);
   logger.info({ address: wallet.address0x, source: wallet.source }, "smoke: wallet");
 
-  // 4. Funding
-  let funded = wallet.source === "byo" || wallet.source === "access-code";
-  if (!funded && config.faucetToken) {
+  // 4. Account (funded-ness is determined by the on-chain balance, not the key source)
+  let account = await queryAccountSafe(client);
+
+  // 5. Top up via the privileged faucet only if we have a token and no balance yet.
+  if (
+    (!account || account.balance === 0n) &&
+    config.faucetToken &&
+    (wallet.source === "generated" || wallet.source === "keystore")
+  ) {
     const drip = await requestFaucetDrip({
       faucetUrl: config.faucetUrl,
       token: config.faucetToken,
       address0x: wallet.address0x,
       logger,
     });
-    funded = drip.funded;
-    if (funded) await sleep(3000); // wait for the deposit to land on chain
-  } else if (!funded) {
-    logger.warn(
-      "smoke: no funding source (set PROOF_PRIVATE_KEY, PROOF_ACCESS_CODE, or PROOF_FAUCET_TOKEN) — read-only run",
-    );
+    if (drip.funded) {
+      await sleep(3000); // wait for the deposit to land on chain
+      account = await queryAccountSafe(client);
+    }
   }
 
-  // 5. Account
-  const account = await queryAccountSafe(client);
+  const funded = !!account && account.balance > 0n;
   if (account) {
     logger.info(
       {
@@ -72,7 +75,9 @@ export async function runSmoke(config: Config, logger: Logger): Promise<void> {
       "smoke: account",
     );
   } else {
-    logger.warn("smoke: account not found (no deposit on chain yet)");
+    logger.warn(
+      "smoke: account not found — no balance on chain yet (deposit still landing, or set a funding source)",
+    );
   }
 
   // 6. Orderbook

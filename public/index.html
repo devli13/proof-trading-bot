@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>proof-trading-bot</title>
+    <style>
+      :root { color-scheme: dark; }
+      body {
+        margin: 0; min-height: 100vh; display: grid; place-items: center;
+        background: #0b0d12; color: #e6e8ee;
+        font: 15px/1.6 ui-monospace, SFMono-Regular, Menlo, monospace;
+      }
+      .card {
+        max-width: 640px; padding: 2rem 2.25rem; border: 1px solid #1e2230;
+        border-radius: 14px; background: #11141c;
+      }
+      h1 { margin: 0 0 .25rem; font-size: 1.4rem; }
+      .sub { color: #8b93a7; margin: 0 0 1.25rem; }
+      a { color: #7aa2ff; text-decoration: none; }
+      a:hover { text-decoration: underline; }
+      code { background: #1a1e2a; padding: .1rem .4rem; border-radius: 6px; }
+      .row { display: flex; gap: .6rem; align-items: baseline; margin: .35rem 0; }
+      .dot { width: 8px; height: 8px; border-radius: 50%; background: #3ddc84; display: inline-block; }
+      pre { background: #0d1017; padding: 1rem; border-radius: 10px; overflow: auto; }
+      .muted { color: #6b7286; }
+    </style>
+  </head>
+  <body>
+    <div class="card">
+      <h1>proof-trading-bot</h1>
+      <p class="sub">Experimental bot on Proof Exchange impact markets · devnet (paper money)</p>
+
+      <div class="row"><span class="dot"></span> <span id="status">checking <code>/api/status</code>…</span></div>
+
+      <p>Endpoints:</p>
+      <ul>
+        <li><a href="/api/status">/api/status</a> — chain height + (if a key is set) account balance</li>
+        <li><code>/api/tick</code> — one strategy tick (driven by Vercel Cron; needs <code>CRON_SECRET</code>)</li>
+      </ul>
+
+      <pre id="out" class="muted">loading…</pre>
+      <p class="muted">Source: github.com/devli13/proof-trading-bot</p>
+    </div>
+
+    <script>
+      fetch("/api/status")
+        .then((r) => r.json())
+        .then((j) => {
+          document.getElementById("status").innerHTML =
+            "live · network <code>" + (j.network ?? "?") + "</code> · height " + (j.height ?? "?");
+          document.getElementById("out").textContent = JSON.stringify(j, null, 2);
+        })
+        .catch((e) => {
+          document.getElementById("status").textContent = "status check failed";
+          document.getElementById("out").textContent = String(e);
+        });
+    </script>
+  </body>
+</html>

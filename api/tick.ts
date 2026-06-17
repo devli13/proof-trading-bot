@@ -1,8 +1,8 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
-import { loadConfig } from "../src/config";
-import { createLogger } from "../src/logger";
-import { executeTick } from "../src/runner";
-import { NoopStrategy } from "../src/strategy/noop";
+import { loadConfig } from "../src/config.js";
+import { createLogger } from "../src/logger.js";
+import { executeTick } from "../src/runner.js";
+import { NoopStrategy } from "../src/strategy/noop.js";
 
 /**
  * Vercel Cron entrypoint — runs ONE strategy tick per invocation (see

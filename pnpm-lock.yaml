@@ -11,6 +11,9 @@ importers:
       '@proof/trading-sdk':
         specifier: link:./vendor/trading-sdk
         version: link:vendor/trading-sdk
+      dotenv:
+        specifier: ^16.4.7
+        version: 16.6.1
       pino:
         specifier: ^9.5.0
         version: 9.14.0
@@ -725,6 +728,10 @@ packages:
   detect-libc@2.1.2:
     resolution: {integrity: sha512-Btj2BOOO83o3WyH59e8MgXsxEQVcarkUOpEYrubB0urwnN10yQ364rsiByU11nZlqWYZm05i/of7io4mzihBtQ==}
     engines: {node: '>=8'}
+
+  dotenv@16.6.1:
+    resolution: {integrity: sha512-uBq4egWHTcTt33a72vpSG0z3HnPuIl6NqYcTrKEg2azoEyl2hpW0zqlxysq2pK9HlDIHyHyakeYaYnSAwd8bow==}
+    engines: {node: '>=12'}
 
   edge-runtime@2.5.9:
     resolution: {integrity: sha512-pk+k0oK0PVXdlT4oRp4lwh+unuKB7Ng4iZ2HB+EZ7QCEQizX360Rp/F4aRpgpRgdP2ufB35N+1KppHmYjqIGSg==}
@@ -1875,6 +1882,8 @@ snapshots:
       ms: 2.1.3
 
   detect-libc@2.1.2: {}
+
+  dotenv@16.6.1: {}
 
   edge-runtime@2.5.9:
     dependencies:

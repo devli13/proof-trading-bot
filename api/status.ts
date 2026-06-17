@@ -1,9 +1,9 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
-import { loadConfig } from "../src/config";
-import { createLogger } from "../src/logger";
-import { createClient, queryAccountSafe } from "../src/client";
-import { loadWallet } from "../src/wallet";
-import { formatMicroUsdc } from "../src/units";
+import { loadConfig } from "../src/config.js";
+import { createLogger } from "../src/logger.js";
+import { createClient, queryAccountSafe } from "../src/client.js";
+import { loadWallet } from "../src/wallet.js";
+import { formatMicroUsdc } from "../src/units.js";
 
 /**
  * Read-only status endpoint — chain height plus (if PROOF_PRIVATE_KEY is set)

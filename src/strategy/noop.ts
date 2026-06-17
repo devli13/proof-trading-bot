@@ -1,4 +1,4 @@
-import type { Strategy, StrategyContext } from "./types";
+import type { Strategy, StrategyContext } from "./types.js";
 
 /**
  * Read-only baseline strategy: observes the configured market and account but

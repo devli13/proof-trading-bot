@@ -8,6 +8,25 @@ git submodule).
 > ⚠️ Experimental. Defaults to the **devnet (paper money)**. It will refuse to
 > trade against anything else unless you explicitly set `PROOF_ALLOW_REAL=1`.
 
+## Status (2026-06-17)
+
+- ✅ **Engine + devnet reads working** — connects to `api.dev.proof.trade`, lists
+  the 1,310 markets, reads orderbooks/health. `pnpm typecheck` + `pnpm test` green.
+- ✅ **Wallet + funding plumbing** — `wallet`/`fund` CLI commands; supports a
+  bring-your-own key, the beta-challenge access-code redeem, and the faucet token.
+- 🟡 **Funding blocked by a backend/SDK issue** — a wallet redeemed for the beta
+  challenge (`beta.proof.trade`) is **`not found`** on the documented gateway
+  (`api.dev.proof.trade` / `exchange-devnet-1`), so it can't trade yet. Details +
+  repro in [`PROOF_SDK_FEEDBACK.md`](./PROOF_SDK_FEEDBACK.md) (issue #1). Likely a
+  different gateway/chain for the beta challenge — pending confirmation from Proof.
+- 🟡 **Vercel deploy** — live at `asymmetra/proof-trading-bot`; cron + functions
+  wired. Fixing an ESM bundling issue in the serverless functions (see the Vercel
+  section). Root `/` is a status page; the bot runs at `/api/tick` (cron) and
+  `/api/status`.
+
+Found a bunch of SDK/devnet rough edges along the way — written up for the Proof
+team in **[`PROOF_SDK_FEEDBACK.md`](./PROOF_SDK_FEEDBACK.md)**.
+
 ## What are impact markets?
 
 Creating one impact market spawns a family of **5 order books**: the underlying
@@ -30,30 +49,51 @@ pnpm smoke              # connect → read markets/account/book → place+cancel
 
 If you cloned without submodules: `git submodule update --init --recursive && pnpm build:sdk`.
 
-## Funding (pick one)
+## Wallet & funding
 
-The smoke test reads the chain with no credentials; to actually place orders the
-account needs funds. In precedence order:
+Create a devnet wallet and inspect it:
 
-1. **`PROOF_PRIVATE_KEY`** — a hex private key that's already funded. Required
-   for Vercel (no writable keystore there).
-2. **`PROOF_ACCESS_CODE`** (+ `PROOF_REDEEM_URL`) — paper-trading competition
-   path: the contest server redeems your single-use code and returns a funded
-   key, which is cached to the keystore.
-3. **`PROOF_FAUCET_TOKEN`** — privileged devnet faucet (Proof-team internal).
-   Funds a freshly generated/keystore key via `POST {faucet}/drip`.
+```bash
+pnpm wallet         # show the current keypair (generates one if none exists)
+pnpm wallet:new     # generate a fresh keypair into the gitignored keystore
+```
 
-Keys are stored in `KEYSTORE_PATH` (default `.keys/devnet.json`, gitignored) and
-are never committed.
+The smoke test reads the chain with no credentials; to place orders the account
+needs funds. Three paths, in precedence order:
+
+1. **`PROOF_PRIVATE_KEY`** — a hex private key that's already funded. Required for
+   Vercel (no writable keystore there).
+2. **`PROOF_ACCESS_CODE`** (+ `PROOF_REDEEM_URL`) — **beta-challenge path** (what we
+   use). Redeem a single-use code; the server returns a **new pre-funded wallet**
+   `{privateKeyHex, address}`, which is cached to the keystore. The redeem host for
+   the current challenge is `https://beta.proof.trade/access-code/redeem`. ⚠️ Note:
+   redeem returns its *own* funded address — it does not fund a wallet you already
+   generated.
+3. **`PROOF_FAUCET_TOKEN`** — privileged devnet faucet (Proof-team internal). Funds
+   a generated/keystore key via `POST {faucet}/drip`, then `pnpm fund` verifies the
+   balance.
+
+Keys live in `KEYSTORE_PATH` (default `.keys/devnet.json`, gitignored) — never
+committed.
+
+> ⚠️ **Known blocker:** a wallet redeemed for the beta challenge currently reads
+> back as `not found` on `api.dev.proof.trade`. See
+> [`PROOF_SDK_FEEDBACK.md`](./PROOF_SDK_FEEDBACK.md) #1 — likely a different
+> gateway/chain for the challenge. Once the correct gateway is known, set
+> `PROOF_NETWORK=custom` + `PROOF_GATEWAY_URL` + `PROOF_CHAIN_ID` + `PROOF_ALLOW_REAL=1`
+> (or we add a `beta` preset in `src/config.ts`).
 
 ## Commands
 
-| Command          | What it does                                                        |
-| ---------------- | ------------------------------------------------------------------- |
-| `pnpm smoke`     | One-shot devnet smoke test (connectivity, reads, place+cancel).     |
-| `pnpm run`       | Long-lived strategy loop (block + interval ticks, graceful SIGINT). |
-| `pnpm typecheck` | `tsc --noEmit`.                                                      |
-| `pnpm test`      | Vitest (config + unit helpers).                                     |
+| Command           | What it does                                                        |
+| ----------------- | ------------------------------------------------------------------- |
+| `pnpm wallet`     | Show the current devnet wallet (generates one if none).             |
+| `pnpm wallet:new` | Generate a fresh keypair into the keystore.                         |
+| `pnpm fund`       | Drip the devnet faucet into the wallet and verify balance.          |
+| `pnpm smoke`      | One-shot devnet smoke test (connectivity, reads, place+cancel).     |
+| `pnpm run`        | Long-lived strategy loop (block + interval ticks, graceful SIGINT). |
+| `pnpm typecheck`  | `tsc --noEmit`.                                                      |
+| `pnpm test`       | Vitest (config + unit helpers).                                     |
 
 ## Writing a strategy
 
@@ -70,29 +110,34 @@ Strategies implement the [`Strategy`](src/strategy/types.ts) interface
 subscribes to blocks, and ticks every `TICK_INTERVAL_MS`. Best for higher
 frequency.
 
-**B. Vercel Cron (serverless).** [`vercel.json`](vercel.json) schedules
-`/api/tick` (default every 5 min); each invocation runs one `onTick` via
-[`api/tick.ts`](api/tick.ts). [`api/status.ts`](api/status.ts) reports height +
-balance.
+**B. Vercel Cron (serverless).** Deployed at **`asymmetra/proof-trading-bot`** (Git
+integration — pushing to `main` auto-deploys). [`vercel.json`](vercel.json) schedules
+`/api/tick` every 5 min; each invocation runs one `onTick` via
+[`api/tick.ts`](api/tick.ts). Surfaces:
 
-Deploy:
+| Route          | What                                                                 |
+| -------------- | ------------------------------------------------------------------- |
+| `/`            | Static status page ([`public/index.html`](public/index.html)).      |
+| `/api/status`  | Chain height + (if `PROOF_PRIVATE_KEY` set) account balance.         |
+| `/api/tick`    | One strategy tick. Cron-only — guarded by `CRON_SECRET`.            |
 
-```bash
-vercel link
-vercel env add PROOF_PRIVATE_KEY     # a funded devnet key
-vercel env add CRON_SECRET           # any random string; Vercel sends it as a Bearer token to /api/tick
-vercel env add PROOF_NETWORK         # devnet
-vercel deploy --prod
-```
+Env vars (already set in Production): `PROOF_PRIVATE_KEY` (funded key — there's no
+writable keystore on Vercel), `CRON_SECRET` (Vercel sends it as `Authorization:
+Bearer …` to `/api/tick`), `PROOF_NETWORK`. Set more with
+`vercel env add <NAME> production`.
 
 Notes:
 
-- The SDK submodule is fetched over **https** so Vercel can build it; the
-  `postinstall` step compiles it to `dist/`.
-- Cron cadence/limits depend on your Vercel plan. Per-minute crons need a paid
-  plan; for true high-frequency trading use option A.
-- WebSocket block streaming only runs in the long-lived loop — the serverless
-  path uses polling `onTick` only.
+- **ESM gotcha:** Vercel's Node runtime runs the functions as ESM and does *not*
+  bundle them, so **all relative imports use explicit `.js` extensions** (e.g.
+  `../src/config.js`). Without them the function fails at runtime with
+  `ERR_MODULE_NOT_FOUND`.
+- The SDK submodule is fetched over **https** so Vercel can fetch it; `postinstall`
+  compiles it to `dist/`.
+- Cron cadence/limits depend on your Vercel plan. Per-minute crons need a paid plan;
+  for true high-frequency trading use option A.
+- WebSocket block streaming only runs in the long-lived loop — the serverless path
+  polls `onTick` only.
 
 ## Layout
 

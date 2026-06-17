@@ -1,9 +1,9 @@
-import { createClient, queryAccountSafe } from "./client";
-import { loadWallet, generateWallet } from "./wallet";
-import { requestFaucetDrip } from "./faucet";
-import { formatMicroUsdc } from "./units";
-import type { Config } from "./config";
-import type { Logger } from "./logger";
+import { createClient, queryAccountSafe } from "./client.js";
+import { loadWallet, generateWallet } from "./wallet.js";
+import { requestFaucetDrip } from "./faucet.js";
+import { formatMicroUsdc } from "./units.js";
+import type { Config } from "./config.js";
+import type { Logger } from "./logger.js";
 
 /** `wallet` — show the current keypair; `wallet new` — generate a fresh one. */
 export async function walletCommand(

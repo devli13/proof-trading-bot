@@ -24,6 +24,7 @@
   },
   "dependencies": {
     "@proof/trading-sdk": "link:./vendor/trading-sdk",
+    "dotenv": "^16.4.7",
     "pino": "^9.5.0",
     "pino-pretty": "^13.0.0",
     "zod": "^3.23.8"

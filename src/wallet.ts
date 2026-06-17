@@ -8,8 +8,8 @@ import {
   hexToBytes,
   bytesToHex,
 } from "@proof/trading-sdk";
-import type { Config } from "./config";
-import type { Logger } from "./logger";
+import type { Config } from "./config.js";
+import type { Logger } from "./logger.js";
 
 export type WalletSource = "byo" | "access-code" | "keystore" | "generated";
 

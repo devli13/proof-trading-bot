@@ -5,13 +5,13 @@ import {
   placeLimitOrder,
   cancelAllOrders,
   queryAccountSafe,
-} from "./client";
-import { loadWallet } from "./wallet";
-import type { Wallet } from "./wallet";
-import { requestFaucetDrip } from "./faucet";
-import type { Config } from "./config";
-import type { Logger } from "./logger";
-import type { PlaceLimitArgs, Strategy, StrategyContext } from "./strategy/types";
+} from "./client.js";
+import { loadWallet } from "./wallet.js";
+import type { Wallet } from "./wallet.js";
+import { requestFaucetDrip } from "./faucet.js";
+import type { Config } from "./config.js";
+import type { Logger } from "./logger.js";
+import type { PlaceLimitArgs, Strategy, StrategyContext } from "./strategy/types.js";
 
 interface BuiltContext {
   ctx: StrategyContext;

@@ -1,7 +1,7 @@
 import { ExchangeClient, Side } from "@proof/trading-sdk";
 import type { AccountInfo, TxResult } from "@proof/trading-sdk";
-import type { Config } from "./config";
-import type { Wallet } from "./wallet";
+import type { Config } from "./config.js";
+import type { Wallet } from "./wallet.js";
 
 /** Build an ExchangeClient pinned to the configured network. */
 export function createClient(config: Config): ExchangeClient {

@@ -7,9 +7,9 @@ import type {
   Side,
   TxResult,
 } from "@proof/trading-sdk";
-import type { Config } from "../config";
-import type { Logger } from "../logger";
-import type { Wallet } from "../wallet";
+import type { Config } from "../config.js";
+import type { Logger } from "../logger.js";
+import type { Wallet } from "../wallet.js";
 
 export interface PlaceLimitArgs {
   market: number;

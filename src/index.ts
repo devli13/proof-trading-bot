@@ -1,9 +1,10 @@
-import { loadConfig } from "./config";
-import { createLogger } from "./logger";
-import { runSmoke } from "./smoke";
-import { runBot } from "./runner";
-import { walletCommand, fundCommand } from "./commands";
-import { NoopStrategy } from "./strategy/noop";
+import "dotenv/config";
+import { loadConfig } from "./config.js";
+import { createLogger } from "./logger.js";
+import { runSmoke } from "./smoke.js";
+import { runBot } from "./runner.js";
+import { walletCommand, fundCommand } from "./commands.js";
+import { NoopStrategy } from "./strategy/noop.js";
 
 /**
  * CLI entry.
