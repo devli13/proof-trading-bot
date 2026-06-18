@@ -8,39 +8,56 @@ git submodule).
 > ⚠️ Experimental. Defaults to the **devnet (paper money)**. It will refuse to
 > trade against anything else unless you explicitly set `PROOF_ALLOW_REAL=1`.
 
-## Status (2026-06-17)
+## Status (2026-06-18)
 
-- ✅ **Engine + devnet reads working** — connects to `api.dev.proof.trade`, lists
-  the 1,310 markets, reads orderbooks/health. `pnpm typecheck` + `pnpm test` green.
-- ✅ **Wallet + funding plumbing** — `wallet`/`fund` CLI commands; supports a
-  bring-your-own key, the beta-challenge access-code redeem, and the faucet token.
-- ✅ **Funded wallet can place orders** — confirmed against a $10k beta account:
-  `submitTx` for `PlaceOrder`/`CancelAllOrders` returns **CheckTx code 0**. The
-  gateway is the *same* `api.dev.proof.trade` / `exchange-devnet-1` the SDK
-  defaults to (verified from the beta web app's own bundle).
-- 🟡 **SDK read endpoints are broken on this gateway** — `queryAccount` /
-  `queryOpenOrders` (`GET /v1/account/<hex>`) return `404 not found` for the
-  funded account, and `submitTxCommit`'s `/tx` confirm-poll times out, even though
-  the web app reads it fine (via `/info`). So the bot can trade but can't read its
-  balance/positions/fills via the SDK. Full repro in
-  [`PROOF_SDK_FEEDBACK.md`](./PROOF_SDK_FEEDBACK.md) (#1, #1b) — reported to Proof.
-- 🟡 **Vercel deploy** — live at `asymmetra/proof-trading-bot`; cron + functions
-  wired. Fixing an ESM bundling issue in the serverless functions (see the Vercel
-  section). Root `/` is a status page; the bot runs at `/api/tick` (cron) and
-  `/api/status`.
+A **multi-strategy bot** running live on devnet — adversarially reviewed (plan + code)
+and deployed.
 
-Found a bunch of SDK/devnet rough edges along the way — written up for the Proof
-team in **[`PROOF_SDK_FEEDBACK.md`](./PROOF_SDK_FEEDBACK.md)**.
+- ✅ **Two strategies, one shared-margin account:** a **market-maker** (cancel-replace,
+  inventory-skewed, post-only) and a **parity / atomic-basket arb** on the HYPE impact
+  event #203, run side by side by a multi-strategy runner.
+- ✅ **Hardened** against a 101-finding plan review + a code audit: order **tick/lot
+  snapping**, **serialized submits** (timestamp-nonce safety), a scenario-aware
+  **kill-switch** (cancel-all + halt on margin/drawdown breach), market/legs caching,
+  retry/robustness, and `DRY_RUN`. `pnpm typecheck` + **35 unit tests** green.
+- ✅ **Verified live** on the funded $10k wallet: real MM orders placed (CheckTx 0),
+  kill-switch trips + flattens, all recorded to **Supabase** (isolated `proof_bot` schema).
+- ✅ **Deployed** at `asymmetra/proof-trading-bot` — Vercel cron runs the arb every 5 min.
+- 🟡 **SDK read/confirm gaps remain** (account + open-orders `404` → we read via `/info`;
+  CheckTx ≠ DeliverTx → can't confirm execution). All reported in
+  **[`PROOF_SDK_FEEDBACK.md`](./PROOF_SDK_FEEDBACK.md)** (#1–#11).
 
 ## What are impact markets?
 
 Creating one impact market spawns a family of **5 order books**: the underlying
 perp plus four conditional/basket legs (`CPY`/`CPN` = conditional-proof yes/no,
-`EBY`/`EBN` = exact-basket yes/no). Traders take YES/NO positions on a binary
-event; at a deadline it resolves **YES / NO / VOID** via an oracle
-price-vs-strike comparison or a relayer attestation, and positions settle. All
-prices are integer **cents** and balances are **microUSDC** — everything is
-`bigint`, never a float.
+`EBY`/`EBN` = exact-basket yes/no, i.e. binary prediction legs). Traders take
+YES/NO positions on a binary event; at a deadline it resolves **YES / NO / VOID**
+via an oracle price-vs-strike comparison or a relayer attestation, and positions
+settle. Everything is `bigint`, never a float. Prices are **micro-USDC** (`$1 =
+1_000_000`); binary legs trade in `0..1_000_000`. Per-market `tickSize`/`lotSize`/
+`szDecimals` matter (binary legs: `tick=1, lot=100`; `szDecimals=2` ⇒ `qty=100` =
+1 contract) — orders are snapped or the engine rejects them. (The SDK docs' "integer
+cents" is wrong — see [`PROOF_SDK_FEEDBACK.md`](./PROOF_SDK_FEEDBACK.md) #6/#9.)
+
+## Strategies
+
+Both run side by side under one funded account (cross-margin; **Proof has no
+subaccounts** — agent wallets are the per-strategy-key option, documented as future).
+A scenario-aware **kill-switch** cancels all + halts on a margin/drawdown breach.
+
+- **`market-maker`** — quotes a post-only bid+ask on one leg (default the event's base
+  perp), `mid ± MM_SPREAD_BPS/2`, inventory-skewed, with the side that grows `|position|`
+  suppressed past `MM_MAX_POSITION`. Cancel-replace each tick (robust to the missing
+  open-orders read); fills inferred from `/info` positions.
+- **`parity-arb`** — watches binary parity `EBY + EBN` vs `$1`; on a dislocation past
+  fees + a **VOID safety margin**, captures it with a 2-leg **`AtomicBasketOrder`** (FOK,
+  no resting orders). An opt-in (`ARB_CONDITIONAL_ENABLED`) 3-leg conditional basket
+  expresses an explicitly **directional** view (`base` vs `p·CPY+(1−p)·CPN`) — *not* an
+  arb, since conditional legs settle to the underlying price in-branch.
+
+Risk knobs (`.env.example`): `MM_*`, `ARB_*`, `MIN_MARGIN_RATIO_BPS`, `MAX_DRAWDOWN_BPS`,
+`RESOLUTION_GUARD_MS`. Start with `DRY_RUN=1` to log intended orders without submitting.
 
 ## Quick start (devnet)
 
@@ -96,18 +113,30 @@ committed.
 | `pnpm wallet:new` | Generate a fresh keypair into the keystore.                         |
 | `pnpm fund`       | Drip the devnet faucet into the wallet and verify balance.          |
 | `pnpm smoke`      | One-shot devnet smoke test (connectivity, reads, place+cancel).     |
-| `pnpm run`        | Long-lived strategy loop (block + interval ticks, graceful SIGINT). |
+| `pnpm tick`       | Run ONE multi-strategy tick (no resting-order cleanup) — used by cron. |
+| `pnpm run`        | Long-lived multi-strategy loop; flattens (cancel-all) on SIGINT.    |
 | `pnpm typecheck`  | `tsc --noEmit`.                                                      |
-| `pnpm test`       | Vitest (config + unit helpers).                                     |
+| `pnpm test`       | Vitest (35 tests: config, snapping, parity math, quotes, risk).     |
+
+## Tracking (Supabase)
+
+The SDK can't read open orders or fills, so the bot keeps its own ledger
+([`src/tracking/`](src/tracking)): every submitted order/basket, periodic position
+snapshots, and strategy decisions. In-memory by default; set **`DATABASE_URL`** to
+persist to Supabase/Postgres in a dedicated **`DB_SCHEMA`** (`proof_bot`, isolated
+from other projects). Schema in [`migration.sql`](src/tracking/migration.sql)
+(auto-applied on connect). For Vercel serverless, use the **transaction pooler
+(`:6543`)**; for a local long-running loop the session pooler (`:5432`) is fine.
 
 ## Writing a strategy
 
-Strategies implement the [`Strategy`](src/strategy/types.ts) interface
-(`init` / `onTick` / `onBlock` / `shutdown`). The runner injects a
-`StrategyContext` with read helpers and **risk-guarded** writes (`placeLimit`,
-`cancelAll`) that enforce `MAX_ORDER_QTY` and `MAX_OPEN_ORDERS`. Copy
-[`src/strategy/noop.ts`](src/strategy/noop.ts) as a template and register it in
-[`src/index.ts`](src/index.ts).
+Implement the [`Strategy`](src/strategy/types.ts) interface (`onTick`, optional
+`init`/`shutdown`). The runner injects a `StrategyContext` whose writes (`place`,
+`cancelMarket`, `basket`) are **snapped to tick/lot, qty-capped, serialized
+(nonce-safe), tracked, and `DRY_RUN`-aware** — strategies can't bypass them. Copy
+[`market-maker.ts`](src/strategy/market-maker.ts) or
+[`parity-arb.ts`](src/strategy/parity-arb.ts) and register it in
+[`buildStrategies`](src/strategy/index.ts).
 
 ## Run it while you sleep — two options
 
@@ -126,9 +155,13 @@ integration — pushing to `main` auto-deploys). [`vercel.json`](vercel.json) sc
 | `/api/status`  | Chain height + (if `PROOF_PRIVATE_KEY` set) account balance.         |
 | `/api/tick`    | One strategy tick. Cron-only — guarded by `CRON_SECRET`.            |
 
-Env vars (already set in Production): `PROOF_PRIVATE_KEY` (funded key — there's no
-writable keystore on Vercel), `CRON_SECRET` (Vercel sends it as `Authorization:
-Bearer …` to `/api/tick`), `PROOF_NETWORK`. Set more with
+On the 5-min cron we run **`STRATEGIES=parity-arb`** (FOK, cadence-safe); the
+market-maker wants a faster loop than 5 min, so run it via `pnpm run` on a VM.
+
+Env vars (set in Production): `PROOF_PRIVATE_KEY` (funded key — no writable keystore
+on Vercel), `CRON_SECRET` (Vercel sends it as `Authorization: Bearer …`; the route is
+**fail-closed** — unset ⇒ 503), `PROOF_NETWORK`, `PROOF_IMPACT_EVENT`, `STRATEGIES`,
+`DATABASE_URL` (transaction pooler), `DB_SCHEMA`. Set more with
 `vercel env add <NAME> production`.
 
 Notes:
@@ -148,15 +181,17 @@ Notes:
 
 ```
 src/
-  config.ts        env + network presets, devnet-safety gate
+  config.ts        env + network presets, devnet-safety gate, all strategy/risk knobs
   wallet.ts        Ed25519 key: BYO / access-code redeem / keystore / generated
-  client.ts        ExchangeClient factory + order helpers
-  faucet.ts        privileged devnet faucet drip
-  units.ts         cents / microUSDC formatting & parsing (bigint)
-  logger.ts        pino logger
-  runner.ts        buildContext + executeTick (cron) + runBot (loop) + risk guard
+  client.ts        ExchangeClient factory + order/basket/account helpers (/info reader)
+  impact.ts        impact-market data (/info impactMarket) + parity math
+  orders.ts        tick/lot snapping + clientOrderId
+  risk.ts          scenario-aware kill-switch
+  runner.ts        BotEngine: multi-strategy, serialized submits, kill-switch, caching
+  strategy/        Strategy interface, market-maker, parity-arb, buildStrategies
+  tracking/        Tracker: in-memory + Supabase/Postgres adapter (proof_bot schema)
   smoke.ts         end-to-end devnet smoke flow
-  strategy/        Strategy interface + NoopStrategy template
+  units.ts logger.ts faucet.ts commands.ts
 api/               Vercel functions: tick (cron), status (read-only)
 vendor/trading-sdk git submodule — @proof/trading-sdk
 ```

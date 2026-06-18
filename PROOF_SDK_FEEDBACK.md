@@ -204,6 +204,52 @@ order prices from the live book, but the docs would mislead a new integrator.
 
 ---
 
+## #7 — Binary VOID settlement is undocumented (breaks "parity is riskless") · **High**
+
+The impact-market description says *"If the outcome cannot be determined through the
+resolution window, the event may void."* But what a **binary leg (EBY/EBN) pays under
+VOID** is not documented anywhere we could find (types, AGENTS.md, docs). This matters:
+the natural binary arb assumes `EBY + EBN = $1` at settlement (exactly one pays $1).
+If VOID instead settles both to $0 (or refunds entry), the "near-riskless" parity has
+real tail risk. **Please publish a settlement table** (per leg kind × YES/NO/VOID:
+settles-to-mark / $1 / $0 / refund). We coded a conservative VOID guard (no new binary
+entries within `RESOLUTION_GUARD_MS` of the deadline) but it's a guess without ground truth.
+
+## #8 — `/info impactMarket` exists but is undocumented; no SDK method · **Medium**
+
+There's no `queryImpactMarketInfo` on `ExchangeClient`, so to enumerate an event's 5
+legs we reverse-engineered `POST /info {type:"impactMarket",id}`. It returns base64
+msgpack as a **positional array** (impact #203):
+`[impactId, underlying, cpy, cpn, eby, ebn, question, deadlineMs, resolutionWindowMs,
+status(string), createdMs, resolvedMs, null, description, resolutionRules]`. Please add
+a typed SDK method + document the shape (and the `status` encoding, which other lenses
+reported differs between single-market and bulk queries).
+
+## #9 — Per-market tick/lot/szDecimals must be read + snapped or orders reject · **Medium**
+
+Confirmed live: binary legs (EBY/EBN m20302/20303) have `tickSize=1, lotSize=100`
+(quantity MUST be a multiple of 100); perp/conditional legs have `tickSize=0, lotSize=0`;
+all have `szDecimals=2` (quantity is in **0.01-contract units** — `qty=100` = 1 contract).
+The "integer cents" framing (#6) plus undocumented per-market gates make it easy to submit
+rejected orders. We now snap price→tick and qty→lot per market. Worth documenting the gate
+fields + an example prominently.
+
+## #10 — Timestamp nonce collides under concurrency (code 21) · **Medium**
+
+`submitTx`'s ms-timestamp nonce collides when two submits land in the same millisecond
+(multi-strategy / batched orders), and the "timestamp nonces are concurrency-safe" note is
+misleading without external serialization. We serialize all submits through one queue with
+monotonic-ms spacing. A per-instance monotonic counter inside the SDK (or documenting the
+requirement) would help.
+
+## #11 — `ClosePosition` / reduce-only IOC accepted but didn't execute · **High** (extends #1b)
+
+Trying to flatten a tiny position: `ClosePosition` and a `reduceOnly` IOC `PlaceOrder` both
+returned **CheckTx code 0** but the position persisted across repeated reads (minutes later).
+Same CheckTx≠DeliverTx gap as #1b — with no way to confirm execution (`/tx` poll times out,
+`queryOpenOrders` 404s), a bot can't reliably close/flatten. A working inclusion/exec read is
+the single highest-leverage fix for bot reliability.
+
 ## Clarifications needed (open questions)
 
 These weren't clear from the README / `AGENTS.md` / `PAPER-TRADING.md`:
