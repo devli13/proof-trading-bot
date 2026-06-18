@@ -50,21 +50,27 @@ cents" is wrong — see [`PROOF_SDK_FEEDBACK.md`](./PROOF_SDK_FEEDBACK.md) #6/#9
 
 ## Strategies
 
-Both run side by side under one funded account (cross-margin; **Proof has no
-subaccounts** — agent wallets are the per-strategy-key option, documented as future).
-A scenario-aware **kill-switch** cancels all + halts on a margin/drawdown breach.
+Each bot runs one (or more) of these on its **own** wallet. A scenario-aware
+**kill-switch** cancels all + halts on a margin/drawdown breach, and every strategy's
+writes are tick/lot-snapped, qty-capped, and position-bounded by the engine.
 
 - **`market-maker`** — quotes a post-only bid+ask on one leg (default the event's base
   perp), `mid ± MM_SPREAD_BPS/2`, inventory-skewed, with the side that grows `|position|`
-  suppressed past `MM_MAX_POSITION`. Cancel-replace each tick (robust to the missing
-  open-orders read); fills inferred from `/info` positions.
+  suppressed past `MM_MAX_POSITION`. Cancel-replace each tick. *(market-making, neutral)*
 - **`parity-arb`** — watches binary parity `EBY + EBN` vs `$1`; on a dislocation past
-  fees + a **VOID safety margin**, captures it with a 2-leg **`AtomicBasketOrder`** (FOK,
-  no resting orders). Net inventory per leg is bounded by **`ARB_MAX_POSITION`** — past
-  the cap it only takes *inventory-reducing* baskets, so the position can't drift. An
-  opt-in (`ARB_CONDITIONAL_ENABLED`) 3-leg conditional basket expresses an explicitly
-  **directional** view (`base` vs `p·CPY+(1−p)·CPN`) — *not* an arb, since conditional
-  legs settle to the underlying price in-branch.
+  fees + a **VOID safety margin**, captures it with a 2-leg **`AtomicBasketOrder`** (FOK).
+  Net inventory per leg bounded by **`ARB_MAX_POSITION`** (only takes reducing baskets at
+  the cap). *(arb, ~neutral)*
+- **`momentum`** / **`mean-reversion`** — base-perp directional from mid vs a rolling
+  mean (`DIR_*`): momentum trades with the move, mean-reversion fades it; flat inside the
+  band. Capped, taker, one step/tick. *(directional)*
+- **`max-profit`** — opportunistic composite: parity capture **and** a momentum lean each
+  tick; aggression comes from the bot's params. *(agnostic)*
+- **`volume-driver`** — **devnet-only**: opens real, sizable positions and unwinds on
+  take-profit / stop / time (`VOL_*`) to add volatility to a stale book — *not* wash
+  trades; hard loss cap. ⚠️ Rule-sensitive (mark manipulation) on a real market.
+- *(planned: `funding-harvest` once a funding-rate source is confirmed, and a standalone
+  `conditional-basket`.)*
 
 Risk knobs (`.env.example`): `MM_*`, `ARB_*`, `MIN_MARGIN_RATIO_BPS`, `MAX_DRAWDOWN_BPS`,
 `RESOLUTION_GUARD_MS`. Start with `DRY_RUN=1` to log intended orders without submitting.

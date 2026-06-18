@@ -170,7 +170,20 @@ export class BotEngine {
       return { halted: true, reason: verdict.reason, equity: verdict.equity.toString() };
     }
 
-    const view = account ? { positions: account.positions, equity: account.equity } : null;
+    // Never trade on an unreadable account: positionFor would read flat and a
+    // directional/volume strategy could re-enter a position it already holds.
+    if (!account) {
+      void this.tracker.recordDecision({
+        bot: this.botId,
+        ts: now,
+        strategy: "engine",
+        action: "skip-tick",
+        detail: { reason: "account unreadable — not trading blind" },
+      });
+      return { halted: false };
+    }
+
+    const view = { positions: account.positions, equity: account.equity };
     for (const strat of this.strategies) {
       for (const ev of this.events) {
         const legs = this.marketData.legsFor(ev);

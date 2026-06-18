@@ -62,6 +62,21 @@ const EnvSchema = z.object({
    *  arb only takes inventory-REDUCING baskets, so net position can't drift. */
   ARB_MAX_POSITION: z.coerce.bigint().default(500n),
 
+  // ── Directional (momentum / mean-reversion), on the base perp ──────────────
+  DIR_MARKET: z.coerce.number().int().nonnegative().default(0), // 0 = base perp
+  DIR_WINDOW: z.coerce.number().int().positive().default(20), // rolling-mean samples
+  DIR_THRESHOLD_BPS: z.coerce.number().int().positive().default(15), // band around the mean
+  DIR_ORDER_QTY: z.coerce.bigint().default(10n),
+  DIR_MAX_POSITION: z.coerce.bigint().default(50n),
+
+  // ── Volume / volatility driver (devnet-only) ───────────────────────────────
+  VOL_MARKET: z.coerce.number().int().nonnegative().default(0),
+  VOL_ORDER_QTY: z.coerce.bigint().default(20n), // sizable enough to move the book
+  VOL_MAX_POSITION: z.coerce.bigint().default(40n),
+  VOL_TAKE_PROFIT_BPS: z.coerce.number().int().positive().default(15),
+  VOL_STOP_BPS: z.coerce.number().int().positive().default(25), // hard loss cap per cycle
+  VOL_HOLD_MS: z.coerce.number().int().positive().default(60_000), // time-exit
+
   // ── Risk / kill-switch ───────────────────────────────────────────────────
   MIN_MARGIN_RATIO_BPS: z.coerce.number().int().nonnegative().default(2000), // 20%
   MAX_DRAWDOWN_BPS: z.coerce.number().int().positive().default(1000), // 10%
@@ -118,6 +133,19 @@ export interface Config {
   arbVoidSafetyBps: number;
   arbConditionalEnabled: boolean;
   arbMaxPosition: bigint;
+
+  dirMarket: number;
+  dirWindow: number;
+  dirThresholdBps: number;
+  dirOrderQty: bigint;
+  dirMaxPosition: bigint;
+
+  volMarket: number;
+  volOrderQty: bigint;
+  volMaxPosition: bigint;
+  volTakeProfitBps: number;
+  volStopBps: number;
+  volHoldMs: number;
 
   minMarginRatioBps: number;
   maxDrawdownBps: number;
@@ -188,6 +216,19 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     arbVoidSafetyBps: e.ARB_VOID_SAFETY_BPS,
     arbConditionalEnabled: e.ARB_CONDITIONAL_ENABLED,
     arbMaxPosition: e.ARB_MAX_POSITION,
+
+    dirMarket: e.DIR_MARKET,
+    dirWindow: e.DIR_WINDOW,
+    dirThresholdBps: e.DIR_THRESHOLD_BPS,
+    dirOrderQty: e.DIR_ORDER_QTY,
+    dirMaxPosition: e.DIR_MAX_POSITION,
+
+    volMarket: e.VOL_MARKET,
+    volOrderQty: e.VOL_ORDER_QTY,
+    volMaxPosition: e.VOL_MAX_POSITION,
+    volTakeProfitBps: e.VOL_TAKE_PROFIT_BPS,
+    volStopBps: e.VOL_STOP_BPS,
+    volHoldMs: e.VOL_HOLD_MS,
 
     minMarginRatioBps: e.MIN_MARGIN_RATIO_BPS,
     maxDrawdownBps: e.MAX_DRAWDOWN_BPS,
