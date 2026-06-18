@@ -8,7 +8,8 @@ describe("loadConfig", () => {
     expect(c.chainId).toBe("exchange-devnet-1");
     expect(c.gatewayUrl).toContain("dev.proof.trade");
     expect(c.allowReal).toBe(false);
-    expect(c.market).toBe(1);
+    expect(c.impactEvent).toBe(203);
+    expect(c.strategies).toContain("market-maker");
   });
 
   it("refuses a custom network without PROOF_ALLOW_REAL", () => {

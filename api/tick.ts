@@ -2,7 +2,7 @@ import type { VercelRequest, VercelResponse } from "@vercel/node";
 import { loadConfig } from "../src/config.js";
 import { createLogger } from "../src/logger.js";
 import { executeTick } from "../src/runner.js";
-import { NoopStrategy } from "../src/strategy/noop.js";
+import { buildStrategies } from "../src/strategy/index.js";
 
 /**
  * Vercel Cron entrypoint — runs ONE strategy tick per invocation (see
@@ -25,7 +25,7 @@ export default async function handler(
   try {
     const config = loadConfig();
     const logger = createLogger(config.logLevel);
-    const result = await executeTick(config, logger, new NoopStrategy());
+    const result = await executeTick(config, logger, buildStrategies(config));
     res.status(200).json({ ok: true, ...result });
   } catch (err) {
     res.status(500).json({ ok: false, error: (err as Error).message });

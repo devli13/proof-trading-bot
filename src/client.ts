@@ -1,6 +1,7 @@
 import { ExchangeClient, Side } from "@proof/trading-sdk";
 import type {
   AccountInfo,
+  AtomicBasketLeg,
   OpenOrder,
   PositionInfo,
   TxResult,
@@ -30,12 +31,14 @@ export interface LimitOrderParams {
   side: Side;
   /** Limit price in micro-USDC (bigint, 1e6 scale). */
   price: bigint;
-  /** Quantity in contracts (bigint). */
+  /** Quantity in 10^-szDecimals contract units (bigint). */
   quantity: bigint;
   /** Reject if it would cross the book on placement (guarantees maker). */
   postOnly?: boolean;
   /** Only reduce an existing position. */
   reduceOnly?: boolean;
+  /** Client-assigned id for tracking/correlation. */
+  clientOrderId?: bigint | null;
 }
 
 /**
@@ -58,11 +61,17 @@ export function placeLimitOrder(
       quantity: p.quantity,
       postOnly: p.postOnly,
       reduceOnly: p.reduceOnly,
+      clientOrderId: p.clientOrderId,
     },
   });
 }
 
-/** Cancel all resting orders (optionally scoped to one market). */
+/**
+ * Cancel resting orders. ALWAYS pass a `market` from a strategy — an undefined
+ * market cancels across ALL markets, which in a multi-strategy account would
+ * cancel other strategies' orders (PROOF review #multi-strategy-cancel-collision).
+ * The account-wide form (market=undefined) is reserved for the kill-switch/shutdown.
+ */
 export function cancelAllOrders(
   client: ExchangeClient,
   wallet: Wallet,
@@ -71,6 +80,31 @@ export function cancelAllOrders(
   return client.submitTx({
     type: "CancelAllOrders",
     data: { owner: wallet.address, market: market ?? null },
+  });
+}
+
+/** Submit an all-or-revert multi-leg basket (each leg is a FOK taker order). */
+export function placeBasket(
+  client: ExchangeClient,
+  wallet: Wallet,
+  legs: AtomicBasketLeg[],
+  maxSlippageBps?: number,
+): Promise<TxResult> {
+  return client.submitTx({
+    type: "AtomicBasketOrder",
+    data: { owner: wallet.address, legs, maxSlippageBps },
+  });
+}
+
+/** Market-close a position on one market (IOC at oracle±spread). */
+export function closePosition(
+  client: ExchangeClient,
+  wallet: Wallet,
+  market: number,
+): Promise<TxResult> {
+  return client.submitTx({
+    type: "ClosePosition",
+    data: { market, owner: wallet.address },
   });
 }
 

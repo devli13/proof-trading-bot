@@ -38,15 +38,44 @@ const EnvSchema = z.object({
     .regex(/^(0x)?[0-9a-fA-F]{2,}$/, "PROOF_PRIVATE_KEY must be hex")
     .optional(),
   PROOF_API_KEY: z.string().min(1).optional(),
-  PROOF_MARKET: z.coerce.number().int().nonnegative().default(1),
   PROOF_ALLOW_REAL: z.preprocess(boolish, z.boolean()).default(false),
   KEYSTORE_PATH: z.string().min(1).default(".keys/devnet.json"),
-  MAX_ORDER_QTY: z.coerce.bigint().default(1n),
-  MAX_OPEN_ORDERS: z.coerce.number().int().positive().default(10),
-  TICK_INTERVAL_MS: z.coerce.number().int().positive().default(5000),
   LOG_LEVEL: z
     .enum(["fatal", "error", "warn", "info", "debug", "trace"])
     .default("info"),
+
+  // ── Strategy selection / targets ─────────────────────────────────────────
+  PROOF_IMPACT_EVENT: z.coerce.number().int().nonnegative().default(203),
+  STRATEGIES: z.string().default("market-maker,parity-arb"),
+  /** Market the MM quotes. 0 = use the event's underlying perp. */
+  MM_MARKET: z.coerce.number().int().nonnegative().default(0),
+
+  // ── Sizing (qty is in 10^-szDecimals contract units; szDecimals=2 ⇒ 0.01) ──
+  MM_ORDER_QTY: z.coerce.bigint().default(10n), // 0.1 HYPE ≈ $7
+  MM_MAX_POSITION: z.coerce.bigint().default(100n), // 1 HYPE ≈ $69
+  MM_SPREAD_BPS: z.coerce.number().int().positive().default(30), // 0.30%
+  ARB_ORDER_QTY: z.coerce.bigint().default(100n), // 1 binary contract (lot=100)
+  ARB_MIN_EDGE_BPS: z.coerce.number().int().positive().default(25),
+  ARB_VOID_SAFETY_BPS: z.coerce.number().int().nonnegative().default(50),
+  ARB_CONDITIONAL_ENABLED: z.preprocess(boolish, z.boolean()).default(false),
+
+  // ── Risk / kill-switch ───────────────────────────────────────────────────
+  MIN_MARGIN_RATIO_BPS: z.coerce.number().int().nonnegative().default(2000), // 20%
+  MAX_DRAWDOWN_BPS: z.coerce.number().int().positive().default(1000), // 10%
+  MAX_ORDER_QTY: z.coerce.bigint().default(1000n),
+  MAX_OPEN_ORDERS: z.coerce.number().int().positive().default(20),
+
+  // ── Lifecycle / cadence ──────────────────────────────────────────────────
+  RESOLUTION_GUARD_MS: z.coerce.number().int().nonnegative().default(86_400_000), // 24h
+  MARKET_CACHE_MS: z.coerce.number().int().positive().default(60_000),
+  TICK_INTERVAL_MS: z.coerce.number().int().positive().default(5000),
+
+  // ── Tracking (Supabase/Postgres) ─────────────────────────────────────────
+  DATABASE_URL: z.string().min(1).optional(),
+
+  // ── Safety ───────────────────────────────────────────────────────────────
+  DRY_RUN: z.preprocess(boolish, z.boolean()).default(false),
+  CRON_SECRET: z.string().min(1).optional(),
 });
 
 export interface Config {
@@ -59,13 +88,33 @@ export interface Config {
   redeemUrl?: string;
   privateKeyHex?: string;
   apiKey?: string;
-  market: number;
   allowReal: boolean;
   keystorePath: string;
+  logLevel: "fatal" | "error" | "warn" | "info" | "debug" | "trace";
+
+  impactEvent: number;
+  strategies: string[];
+  mmMarket: number;
+  mmOrderQty: bigint;
+  mmMaxPosition: bigint;
+  mmSpreadBps: number;
+  arbOrderQty: bigint;
+  arbMinEdgeBps: number;
+  arbVoidSafetyBps: number;
+  arbConditionalEnabled: boolean;
+
+  minMarginRatioBps: number;
+  maxDrawdownBps: number;
   maxOrderQty: bigint;
   maxOpenOrders: number;
+
+  resolutionGuardMs: number;
+  marketCacheMs: number;
   tickIntervalMs: number;
-  logLevel: "fatal" | "error" | "warn" | "info" | "debug" | "trace";
+
+  databaseUrl?: string;
+  dryRun: boolean;
+  cronSecret?: string;
 }
 
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
@@ -82,7 +131,6 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     );
   }
 
-  // Only the unmodified devnet/local presets are auto-allowed.
   const isSafe =
     e.PROOF_NETWORK !== "custom" &&
     SAFE_NETWORKS.has(e.PROOF_NETWORK) &&
@@ -106,12 +154,32 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     redeemUrl: e.PROOF_REDEEM_URL,
     privateKeyHex: e.PROOF_PRIVATE_KEY,
     apiKey: e.PROOF_API_KEY,
-    market: e.PROOF_MARKET,
     allowReal: e.PROOF_ALLOW_REAL,
     keystorePath: e.KEYSTORE_PATH,
+    logLevel: e.LOG_LEVEL,
+
+    impactEvent: e.PROOF_IMPACT_EVENT,
+    strategies: e.STRATEGIES.split(",").map((s) => s.trim()).filter(Boolean),
+    mmMarket: e.MM_MARKET,
+    mmOrderQty: e.MM_ORDER_QTY,
+    mmMaxPosition: e.MM_MAX_POSITION,
+    mmSpreadBps: e.MM_SPREAD_BPS,
+    arbOrderQty: e.ARB_ORDER_QTY,
+    arbMinEdgeBps: e.ARB_MIN_EDGE_BPS,
+    arbVoidSafetyBps: e.ARB_VOID_SAFETY_BPS,
+    arbConditionalEnabled: e.ARB_CONDITIONAL_ENABLED,
+
+    minMarginRatioBps: e.MIN_MARGIN_RATIO_BPS,
+    maxDrawdownBps: e.MAX_DRAWDOWN_BPS,
     maxOrderQty: e.MAX_ORDER_QTY,
     maxOpenOrders: e.MAX_OPEN_ORDERS,
+
+    resolutionGuardMs: e.RESOLUTION_GUARD_MS,
+    marketCacheMs: e.MARKET_CACHE_MS,
     tickIntervalMs: e.TICK_INTERVAL_MS,
-    logLevel: e.LOG_LEVEL,
+
+    databaseUrl: e.DATABASE_URL,
+    dryRun: e.DRY_RUN,
+    cronSecret: e.CRON_SECRET,
   };
 }

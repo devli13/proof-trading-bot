@@ -83,8 +83,8 @@ export async function runSmoke(config: Config, logger: Logger): Promise<void> {
     );
   }
 
-  // 6. Orderbook
-  const market = config.market;
+  // 6. Orderbook (market 1 — a stable perp for the connectivity check)
+  const market = 1;
   const book = await client.queryOrderbook(market);
   logger.info(
     {

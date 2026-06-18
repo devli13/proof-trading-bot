@@ -2,17 +2,17 @@ import "dotenv/config";
 import { loadConfig } from "./config.js";
 import { createLogger } from "./logger.js";
 import { runSmoke } from "./smoke.js";
-import { runBot } from "./runner.js";
+import { runBot, executeTick } from "./runner.js";
 import { walletCommand, fundCommand } from "./commands.js";
-import { NoopStrategy } from "./strategy/noop.js";
+import { buildStrategies } from "./strategy/index.js";
 
 /**
  * CLI entry.
- *   pnpm wallet       → show the current devnet wallet (generates one if none)
- *   pnpm wallet:new   → generate a fresh keypair into the keystore
- *   pnpm fund         → drip the devnet faucet into the wallet (needs token)
- *   pnpm smoke        → one-shot devnet smoke test (connect, read, place+cancel)
- *   pnpm run          → long-lived strategy loop (NoopStrategy by default)
+ *   pnpm wallet      → show/generate the devnet wallet
+ *   pnpm fund        → drip the faucet into the wallet
+ *   pnpm smoke       → connectivity + read smoke test
+ *   pnpm tick        → run ONE multi-strategy tick (no resting-order cleanup)
+ *   pnpm run         → long-lived multi-strategy loop (flattens on SIGINT)
  */
 async function main(): Promise<void> {
   const cmd = process.argv[2] ?? "smoke";
@@ -31,11 +31,16 @@ async function main(): Promise<void> {
     case "smoke":
       await runSmoke(config, logger);
       break;
+    case "tick": {
+      const summary = await executeTick(config, logger, buildStrategies(config));
+      logger.info(summary, "tick: done");
+      break;
+    }
     case "run":
-      await runBot(config, logger, new NoopStrategy());
+      await runBot(config, logger, buildStrategies(config));
       break;
     default:
-      logger.error(`unknown command "${cmd}" — use: wallet | fund | smoke | run`);
+      logger.error(`unknown command "${cmd}" — use: wallet | fund | smoke | tick | run`);
       process.exit(1);
   }
 }
