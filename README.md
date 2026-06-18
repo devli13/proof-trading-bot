@@ -52,9 +52,11 @@ A scenario-aware **kill-switch** cancels all + halts on a margin/drawdown breach
   open-orders read); fills inferred from `/info` positions.
 - **`parity-arb`** — watches binary parity `EBY + EBN` vs `$1`; on a dislocation past
   fees + a **VOID safety margin**, captures it with a 2-leg **`AtomicBasketOrder`** (FOK,
-  no resting orders). An opt-in (`ARB_CONDITIONAL_ENABLED`) 3-leg conditional basket
-  expresses an explicitly **directional** view (`base` vs `p·CPY+(1−p)·CPN`) — *not* an
-  arb, since conditional legs settle to the underlying price in-branch.
+  no resting orders). Net inventory per leg is bounded by **`ARB_MAX_POSITION`** — past
+  the cap it only takes *inventory-reducing* baskets, so the position can't drift. An
+  opt-in (`ARB_CONDITIONAL_ENABLED`) 3-leg conditional basket expresses an explicitly
+  **directional** view (`base` vs `p·CPY+(1−p)·CPN`) — *not* an arb, since conditional
+  legs settle to the underlying price in-branch.
 
 Risk knobs (`.env.example`): `MM_*`, `ARB_*`, `MIN_MARGIN_RATIO_BPS`, `MAX_DRAWDOWN_BPS`,
 `RESOLUTION_GUARD_MS`. Start with `DRY_RUN=1` to log intended orders without submitting.
@@ -151,9 +153,11 @@ integration — pushing to `main` auto-deploys). [`vercel.json`](vercel.json) sc
 
 | Route          | What                                                                 |
 | -------------- | ------------------------------------------------------------------- |
-| `/`            | Static status page ([`public/index.html`](public/index.html)).      |
+| `/`            | Status home ([`public/index.html`](public/index.html)).             |
+| `/dashboard`   | PnL, equity chart, open positions, recent trades, decisions.        |
 | `/api/status`  | Chain height + (if `PROOF_PRIVATE_KEY` set) account balance.         |
-| `/api/tick`    | One strategy tick. Cron-only — guarded by `CRON_SECRET`.            |
+| `/api/stats`   | Trading-ledger stats JSON (powers the dashboard).                   |
+| `/api/tick`    | One strategy tick. Cron-only — fail-closed by `CRON_SECRET`.        |
 
 On the 5-min cron we run **`STRATEGIES=parity-arb`** (FOK, cadence-safe); the
 market-maker wants a faster loop than 5 min, so run it via `pnpm run` on a VM.
