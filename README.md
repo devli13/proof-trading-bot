@@ -10,21 +10,29 @@ git submodule).
 
 ## Status (2026-06-18)
 
-A **multi-strategy bot** running live on devnet — adversarially reviewed (plan + code)
-and deployed.
+A **multi-bot platform** for Proof impact markets: many bots, each a dedicated
+strategy on its **own funded wallet**, run in parallel by a persistent **worker**,
+with a Supabase-backed **registry** + **dashboard**.
 
-- ✅ **Two strategies, one shared-margin account:** a **market-maker** (cancel-replace,
-  inventory-skewed, post-only) and a **parity / atomic-basket arb** on the HYPE impact
-  event #203, run side by side by a multi-strategy runner.
-- ✅ **Hardened** against a 101-finding plan review + a code audit: order **tick/lot
-  snapping**, **serialized submits** (timestamp-nonce safety), a scenario-aware
-  **kill-switch** (cancel-all + halt on margin/drawdown breach), market/legs caching,
-  retry/robustness, and `DRY_RUN`. `pnpm typecheck` + **35 unit tests** green.
-- ✅ **Verified live** on the funded $10k wallet: real MM orders placed (CheckTx 0),
-  kill-switch trips + flattens, all recorded to **Supabase** (isolated `proof_bot` schema).
-- ✅ **Deployed** at `asymmetra/proof-trading-bot` — Vercel cron runs the arb every 5 min.
+- ✅ **N bots in parallel** — one `BotEngine` per wallet (own kill-switch + submit
+  queue), sharing one **market-data fetch** and one tracker. Scale by inserting a
+  registry row (`pnpm bots add`) — no env change, no redeploy.
+- ✅ **Encrypted registry** — the roster lives in `proof_bot.bots`; private keys are
+  **AES-256-GCM encrypted at rest** (`BOTS_ENC_KEY`). No dashboard/API ever reads the
+  key column. Only `DATABASE_URL` + `BOTS_ENC_KEY` to manage.
+- ✅ **Strategies** — `market-maker` + `parity-arb` today, split onto separate wallets;
+  more (`momentum`, `mean-reversion`, `funding-harvest`, `max-profit`, `volume-driver`)
+  pluggable. **Multi-market** built in (a bot's `markets` list; the engine fans its
+  strategy over each), exercised with HYPE event #203.
+- ✅ **Hardened** — tick/lot snapping, **serialized submits** (timestamp-nonce safety),
+  a scenario-aware **kill-switch**, market/legs caching, `DRY_RUN`. `pnpm typecheck` +
+  **44 unit tests** green; adversarially audited.
+- ✅ **Dashboard** (`/dashboard`) — per-bot **profit / volume / strategy-logic**,
+  filter by **bot / strategy / tag / market**, equity chart with hover tooltips.
+- ✅ **Deploy** — the worker runs on **Render** (`render.yaml`); **Vercel is
+  dashboard-only** (cron disabled). All data in **Supabase** (`proof_bot` schema).
 - 🟡 **SDK read/confirm gaps remain** (account + open-orders `404` → we read via `/info`;
-  CheckTx ≠ DeliverTx → can't confirm execution). All reported in
+  CheckTx ≠ DeliverTx → can't confirm execution). All in
   **[`PROOF_SDK_FEEDBACK.md`](./PROOF_SDK_FEEDBACK.md)** (#1–#11).
 
 ## What are impact markets?
@@ -115,10 +123,12 @@ committed.
 | `pnpm wallet:new` | Generate a fresh keypair into the keystore.                         |
 | `pnpm fund`       | Drip the devnet faucet into the wallet and verify balance.          |
 | `pnpm smoke`      | One-shot devnet smoke test (connectivity, reads, place+cancel).     |
-| `pnpm tick`       | Run ONE multi-strategy tick (no resting-order cleanup) — used by cron. |
-| `pnpm run`        | Long-lived multi-strategy loop; flattens (cancel-all) on SIGINT.    |
+| `pnpm worker`     | **Persistent MULTI-bot worker** (registry-driven; the Render entry). |
+| `pnpm bots ...`   | Manage the registry: `list` / `add <id> <strat> <key\|-> [markets] [tags] [json]` / `disable` / `enable`. |
+| `pnpm tick`       | Run ONE single-bot tick (no resting-order cleanup).                 |
+| `pnpm run`        | Long-lived single-bot loop; flattens (cancel-all) on SIGINT.        |
 | `pnpm typecheck`  | `tsc --noEmit`.                                                      |
-| `pnpm test`       | Vitest (35 tests: config, snapping, parity math, quotes, risk).     |
+| `pnpm test`       | Vitest (44 tests: config, snapping, parity math, quotes, risk, crypto). |
 
 ## Tracking (Supabase)
 
@@ -130,72 +140,86 @@ from other projects). Schema in [`migration.sql`](src/tracking/migration.sql)
 (auto-applied on connect). For Vercel serverless, use the **transaction pooler
 (`:6543`)**; for a local long-running loop the session pooler (`:5432`) is fine.
 
-## Writing a strategy
+## Multi-bot worker + registry
 
-Implement the [`Strategy`](src/strategy/types.ts) interface (`onTick`, optional
-`init`/`shutdown`). The runner injects a `StrategyContext` whose writes (`place`,
-`cancelMarket`, `basket`) are **snapped to tick/lot, qty-capped, serialized
-(nonce-safe), tracked, and `DRY_RUN`-aware** — strategies can't bypass them. Copy
-[`market-maker.ts`](src/strategy/market-maker.ts) or
-[`parity-arb.ts`](src/strategy/parity-arb.ts) and register it in
-[`buildStrategies`](src/strategy/index.ts).
+The platform runs many bots in one persistent process. Each bot is a row in the
+**`proof_bot.bots`** registry — `{ strategies[], markets, tags[], encrypted key,
+params }` — and the worker runs one `BotEngine` per enabled bot (own wallet +
+kill-switch + submit queue) against a **shared** market-data fetch and tracker. It
+**hot-reloads** the registry every `BOTS_REFRESH_MS`, so adding/disabling a bot needs
+no restart.
 
-## Run it while you sleep — two options
+```bash
+# generate the at-rest encryption key once, put it in .env (and Render):
+node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"   # → BOTS_ENC_KEY
 
-**A. Long-lived loop (any VM / container).** `pnpm run` keeps a process alive,
-subscribes to blocks, and ticks every `TICK_INTERVAL_MS`. Best for higher
-frequency.
+pnpm bots add mm-base    market-maker -  all "market-making,single-strat" '{"MM_SPREAD_BPS":"30"}'
+pnpm bots add arb-binary parity-arb   -  203 "arb,single-strat"
+pnpm bots list                 # roster, never prints keys
+pnpm worker                    # run them all (DRY_RUN=1 first to dry-run)
+```
 
-**B. Vercel Cron (serverless).** Deployed at **`asymmetra/proof-trading-bot`** (Git
-integration — pushing to `main` auto-deploys). [`vercel.json`](vercel.json) schedules
-`/api/tick` every 5 min; each invocation runs one `onTick` via
-[`api/tick.ts`](api/tick.ts). Surfaces:
+`-` reads the key from `BOT_KEY` (keeps it out of shell history). Keys are
+**AES-256-GCM encrypted** with `BOTS_ENC_KEY` before they touch the DB. ⚠️ Give each
+bot its **own** key — two bots on one wallet collide on the ms-timestamp nonce.
+
+### Deploy (Render worker + Vercel dashboard)
+
+The worker runs on **Render** — create a service from [`render.yaml`](render.yaml)
+(a background worker: `pnpm install` → `pnpm worker`) and set two secrets in the
+dashboard: `DATABASE_URL` and `BOTS_ENC_KEY`. Everything else is in the blueprint.
+Scaling bots is a `pnpm bots add` — no redeploy.
+
+**Vercel is dashboard-only** (the cron is removed). Push to `main` auto-deploys the
+static dashboard + read-only API. Surfaces:
 
 | Route          | What                                                                 |
 | -------------- | ------------------------------------------------------------------- |
 | `/`            | Status home ([`public/index.html`](public/index.html)).             |
-| `/dashboard`   | PnL, equity chart, open positions, recent trades, decisions.        |
+| `/dashboard`   | Fleet view: per-bot PnL/volume/strategy-logic, filters, hover charts. |
 | `/api/status`  | Chain height + (if `PROOF_PRIVATE_KEY` set) account balance.         |
-| `/api/stats`   | Trading-ledger stats JSON (powers the dashboard).                   |
-| `/api/tick`    | One strategy tick. Cron-only — fail-closed by `CRON_SECRET`.        |
+| `/api/stats`   | Multi-bot stats JSON (per-bot breakdown; never the keys).            |
+| `/api/tick`    | One single-bot tick, fail-closed by `CRON_SECRET` (manual/testing).  |
 
-On the 5-min cron we run **`STRATEGIES=parity-arb`** (FOK, cadence-safe); the
-market-maker wants a faster loop than 5 min, so run it via `pnpm run` on a VM.
+- **ESM gotcha:** Vercel runs `api/` as un-bundled ESM, so **all relative imports use
+  explicit `.js` extensions** or they fail with `ERR_MODULE_NOT_FOUND`.
+- The SDK submodule is fetched over **https** (Render + Vercel can clone it);
+  `postinstall` compiles it to `dist/`.
+- For the worker, devDependencies (`tsx`) must be installed — don't set
+  `NODE_ENV=production` on Render.
 
-Env vars (set in Production): `PROOF_PRIVATE_KEY` (funded key — no writable keystore
-on Vercel), `CRON_SECRET` (Vercel sends it as `Authorization: Bearer …`; the route is
-**fail-closed** — unset ⇒ 503), `PROOF_NETWORK`, `PROOF_IMPACT_EVENT`, `STRATEGIES`,
-`DATABASE_URL` (transaction pooler), `DB_SCHEMA`. Set more with
-`vercel env add <NAME> production`.
+## Writing a strategy
 
-Notes:
-
-- **ESM gotcha:** Vercel's Node runtime runs the functions as ESM and does *not*
-  bundle them, so **all relative imports use explicit `.js` extensions** (e.g.
-  `../src/config.js`). Without them the function fails at runtime with
-  `ERR_MODULE_NOT_FOUND`.
-- The SDK submodule is fetched over **https** so Vercel can fetch it; `postinstall`
-  compiles it to `dist/`.
-- Cron cadence/limits depend on your Vercel plan. Per-minute crons need a paid plan;
-  for true high-frequency trading use option A.
-- WebSocket block streaming only runs in the long-lived loop — the serverless path
-  polls `onTick` only.
+Implement the [`Strategy`](src/strategy/types.ts) interface (`onTick`, optional
+`init`/`shutdown`). The engine runs it once per assigned market each tick and injects
+a `StrategyContext` whose writes (`place`, `cancelMarket`, `basket`) are **snapped to
+tick/lot, qty-capped, serialized (nonce-safe), tracked (per bot), and `DRY_RUN`-aware**
+— strategies can't bypass them, and the persistent worker lets them keep state across
+ticks. Copy [`market-maker.ts`](src/strategy/market-maker.ts) or
+[`parity-arb.ts`](src/strategy/parity-arb.ts) and register it in
+[`buildStrategies`](src/strategy/index.ts).
 
 ## Layout
 
 ```
 src/
-  config.ts        env + network presets, devnet-safety gate, all strategy/risk knobs
-  wallet.ts        Ed25519 key: BYO / access-code redeem / keystore / generated
+  config.ts        env + network presets, devnet-safety gate, all strategy/risk/worker knobs
+  wallet.ts        Ed25519 key: BYO / from-hex / access-code / keystore / generated
   client.ts        ExchangeClient factory + order/basket/account helpers (/info reader)
   impact.ts        impact-market data (/info impactMarket) + parity math
+  market-data.ts   SHARED multi-event legs + market metadata (one fetch for all bots)
   orders.ts        tick/lot snapping + clientOrderId
   risk.ts          scenario-aware kill-switch
-  runner.ts        BotEngine: multi-strategy, serialized submits, kill-switch, caching
+  runner.ts        BotEngine (one per bot): submits, kill-switch, multi-market fan-out
+  worker.ts        persistent MULTI-bot runner (registry-driven, hot-reload)
+  bots.ts          registry: load/add/list/disable (encrypted keys)
+  bots-cli.ts      `pnpm bots` admin CLI
+  bot-crypto.ts    AES-256-GCM at-rest key encryption (BOTS_ENC_KEY)
   strategy/        Strategy interface, market-maker, parity-arb, buildStrategies
-  tracking/        Tracker: in-memory + Supabase/Postgres adapter (proof_bot schema)
+  tracking/        Tracker: in-memory + Supabase/Postgres (proof_bot: ledger + bots registry)
   smoke.ts         end-to-end devnet smoke flow
   units.ts logger.ts faucet.ts commands.ts
-api/               Vercel functions: tick (cron), status (read-only)
+api/               Vercel functions: status + stats (read-only dashboard data)
+render.yaml        Render blueprint for the worker
 vendor/trading-sdk git submodule — @proof/trading-sdk
 ```

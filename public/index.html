@@ -35,10 +35,10 @@
 
       <p>Endpoints:</p>
       <ul>
-        <li><a href="/dashboard">/dashboard</a> — trades, equity chart, PnL</li>
+        <li><a href="/dashboard">/dashboard</a> — fleet view: per-bot PnL/volume/strategy, filters, hover charts</li>
         <li><a href="/api/status">/api/status</a> — chain height + (if a key is set) account balance</li>
-        <li><a href="/api/stats">/api/stats</a> — trading stats JSON (from the tracking ledger)</li>
-        <li><code>/api/tick</code> — one strategy tick (driven by Vercel Cron; needs <code>CRON_SECRET</code>)</li>
+        <li><a href="/api/stats">/api/stats</a> — multi-bot stats JSON (per-bot breakdown)</li>
+        <li><code>/api/tick</code> — one single-bot tick (fail-closed by <code>CRON_SECRET</code>)</li>
       </ul>
 
       <pre id="out" class="muted">loading…</pre>

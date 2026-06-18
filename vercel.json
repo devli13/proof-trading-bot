@@ -3,11 +3,5 @@
   "cleanUrls": true,
   "functions": {
     "api/tick.ts": { "maxDuration": 60 }
-  },
-  "crons": [
-    {
-      "path": "/api/tick",
-      "schedule": "*/5 * * * *"
-    }
-  ]
+  }
 }

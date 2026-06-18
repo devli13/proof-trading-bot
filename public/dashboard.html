@@ -3,73 +3,92 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>proof-trading-bot · dashboard</title>
+    <title>proof-trading-bot · fleet dashboard</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
     <style>
       :root { color-scheme: dark; }
       * { box-sizing: border-box; }
       body {
         margin: 0; min-height: 100vh; background: #0b0d12; color: #e6e8ee;
-        font: 14px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace;
-        padding: 1.5rem;
+        font: 13px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; padding: 1.5rem;
       }
-      .wrap { max-width: 1040px; margin: 0 auto; }
+      .wrap { max-width: 1180px; margin: 0 auto; }
       h1 { font-size: 1.3rem; margin: 0 0 .25rem; }
       .sub { color: #8b93a7; margin: 0 0 1.25rem; }
       a { color: #7aa2ff; text-decoration: none; }
-      .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: .75rem; margin-bottom: 1.25rem; }
-      .card { background: #11141c; border: 1px solid #1e2230; border-radius: 12px; padding: .9rem 1rem; }
-      .card .k { color: #8b93a7; font-size: .78rem; text-transform: uppercase; letter-spacing: .04em; }
-      .card .v { font-size: 1.5rem; margin-top: .2rem; }
+      .filters { display: flex; flex-wrap: wrap; gap: .6rem; margin-bottom: 1.1rem; align-items: center; }
+      .filters label { color: #8b93a7; font-size: .72rem; text-transform: uppercase; letter-spacing: .04em; margin-right: .3rem; }
+      select { background: #11141c; color: #e6e8ee; border: 1px solid #262b3a; border-radius: 8px; padding: .35rem .5rem; font: inherit; }
+      .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: .75rem; margin-bottom: 1.25rem; }
+      .card { background: #11141c; border: 1px solid #1e2230; border-radius: 12px; padding: .85rem 1rem; }
+      .card .k { color: #8b93a7; font-size: .72rem; text-transform: uppercase; letter-spacing: .04em; }
+      .card .v { font-size: 1.45rem; margin-top: .2rem; }
       .pos { color: #3ddc84; } .neg { color: #ff6b6b; }
       section { background: #11141c; border: 1px solid #1e2230; border-radius: 12px; padding: 1rem 1.1rem; margin-bottom: 1.25rem; }
-      section h2 { font-size: .95rem; margin: 0 0 .75rem; color: #c7ccda; }
-      table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+      section h2 { font-size: .9rem; margin: 0 0 .75rem; color: #c7ccda; }
+      table { width: 100%; border-collapse: collapse; font-size: 12px; }
       th, td { text-align: right; padding: .35rem .5rem; border-bottom: 1px solid #181c27; white-space: nowrap; }
       th:first-child, td:first-child, th.l, td.l { text-align: left; }
-      th { color: #8b93a7; font-weight: 600; }
+      th { color: #8b93a7; font-weight: 600; cursor: default; }
       .muted { color: #6b7286; }
-      svg { width: 100%; height: 160px; display: block; }
-      .chip { display: inline-block; padding: .05rem .45rem; border-radius: 6px; background: #1a1e2a; }
+      .chip { display: inline-block; padding: .02rem .4rem; border-radius: 6px; background: #1a1e2a; color: #9aa3b8; margin: 0 .15rem .1rem 0; font-size: 11px; }
       .buy { color: #3ddc84; } .sell { color: #ff8f6b; }
+      .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: .4rem; vertical-align: middle; }
+      .logic { font-size: 12px; color: #aeb6c8; margin: .15rem 0 .6rem; }
+      .logic b { color: #e6e8ee; }
+      .chartbox { height: 280px; }
     </style>
   </head>
   <body>
     <div class="wrap">
-      <h1>proof-trading-bot <span class="muted">· dashboard</span></h1>
-      <p class="sub">Impact-market bot on Proof devnet (paper money) · <a href="/api/status">status</a> · <a href="/">home</a> · <span id="asof" class="muted"></span></p>
+      <h1>proof-trading-bot <span class="muted">· fleet dashboard</span></h1>
+      <p class="sub">Multi-bot impact-market platform on Proof devnet (paper money) · <a href="/api/stats">stats JSON</a> · <a href="/api/status">status</a> · <a href="/">home</a> · <span id="asof" class="muted"></span></p>
+
+      <div class="filters">
+        <span><label>bot</label><select id="f-bot"></select></span>
+        <span><label>strategy</label><select id="f-strategy"></select></span>
+        <span><label>tag</label><select id="f-tag"></select></span>
+        <span><label>market</label><select id="f-market"></select></span>
+        <span class="muted" id="f-count"></span>
+      </div>
+
       <div id="cards" class="cards"></div>
-      <section><h2>Equity</h2><svg id="chart" viewBox="0 0 1000 160" preserveAspectRatio="none"></svg><div id="chartlbl" class="muted" style="font-size:12px"></div></section>
-      <section><h2>Open positions</h2><div id="positions"></div></section>
+      <section><h2>Equity over time</h2><div class="chartbox"><canvas id="chart"></canvas></div></section>
+      <section><h2>Bots</h2><div id="bots"></div></section>
+      <section><h2>Strategy logic</h2><div id="logic"></div></section>
       <section><h2>Recent orders</h2><div id="orders"></div></section>
       <section><h2>Decision activity</h2><div id="decisions"></div></section>
     </div>
 
     <script>
-      const MKT = { 7:"HYPE", 1:"BTC", 20300:"HYPE-CPY", 20301:"HYPE-CPN", 20302:"HYPE-EBY", 20303:"HYPE-EBN" };
+      const MKT = { 7:"HYPE", 1:"BTC", 20300:"HYPE-CPY", 20301:"HYPE-CPN", 20302:"HYPE-EBY", 20303:"HYPE-EBN", 203:"HYPE #203" };
       const mkt = (m) => MKT[m] || ("m" + m);
-      const usd = (micro) => micro == null ? "—" : "$" + (Number(micro) / 1e6).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 4 });
+      const usd = (micro) => micro == null ? "—" : "$" + (Number(micro) / 1e6).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
       const sign = (n) => (n > 0 ? "pos" : n < 0 ? "neg" : "");
       const fmtTs = (t) => t ? new Date(t).toISOString().slice(5, 19).replace("T", " ") : "—";
+      const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+      const PALETTE = ["#7aa2ff","#3ddc84","#ff8f6b","#c792ea","#ffd166","#4dd0e1","#f78fb3","#a3e635","#fca5a5","#60a5fa","#f59e0b","#34d399"];
+
+      let DATA = null, chart = null;
+      const F = { bot: "all", strategy: "all", tag: "all", market: "all" };
 
       function card(k, v, cls = "") { return `<div class="card"><div class="k">${k}</div><div class="v ${cls}">${v}</div></div>`; }
 
-      function chart(series) {
-        const svg = document.getElementById("chart");
-        if (!series.length) { svg.innerHTML = ""; return; }
-        const ys = series.map((p) => p.equity / 1e6);
-        let lo = Math.min(...ys), hi = Math.max(...ys);
-        if (hi - lo < 0.01) { hi += 0.01; lo -= 0.01; }
-        const W = 1000, H = 160, pad = 6;
-        const x = (i) => pad + (i / Math.max(1, series.length - 1)) * (W - 2 * pad);
-        const y = (v) => pad + (1 - (v - lo) / (hi - lo)) * (H - 2 * pad);
-        const pts = ys.map((v, i) => `${x(i).toFixed(1)},${y(v).toFixed(1)}`).join(" ");
-        const last = ys[ys.length - 1], first = ys[0];
-        const col = last >= first ? "#3ddc84" : "#ff6b6b";
-        svg.innerHTML =
-          `<polyline fill="none" stroke="${col}" stroke-width="1.5" points="${pts}"/>` +
-          `<circle cx="${x(ys.length - 1)}" cy="${y(last)}" r="2.5" fill="${col}"/>`;
-        document.getElementById("chartlbl").textContent =
-          `range $${lo.toFixed(4)} – $${hi.toFixed(4)} · ${series.length} snapshots`;
+      function fillSelect(id, values, label) {
+        const el = document.getElementById(id);
+        el.innerHTML = `<option value="all">all ${esc(label)}</option>` + values.map((v) => `<option value="${esc(v)}">${esc(v)}</option>`).join("");
+        el.onchange = () => { F[id.slice(2)] = el.value; render(); };
+      }
+
+      function botMatches(b) {
+        if (F.bot !== "all" && b.bot !== F.bot) return false;
+        if (F.strategy !== "all" && !(b.strategies || []).includes(F.strategy)) return false;
+        if (F.tag !== "all" && !(b.tags || []).includes(F.tag)) return false;
+        if (F.market !== "all") {
+          const m = b.markets;
+          if (m !== "all" && !(Array.isArray(m) && m.includes(Number(F.market)))) return false;
+        }
+        return true;
       }
 
       function table(headers, rows) {
@@ -78,43 +97,109 @@
           `<tbody>${rows.map((r) => `<tr>${r.map((c) => `<td class="${c.cls || ""} ${c.l ? "l" : ""}">${c.v}</td>`).join("")}</tr>`).join("")}</tbody></table>`;
       }
 
-      fetch("/api/stats").then((r) => r.json()).then((d) => {
-        if (!d.ok) { document.getElementById("cards").innerHTML = `<div class="card">stats unavailable: ${d.error || "?"}</div>`; return; }
-        document.getElementById("asof").textContent = "as of " + fmtTs(d.asOf);
-        const p = d.pnl;
+      function drawChart(bots) {
+        const ctx = document.getElementById("chart");
+        const datasets = bots.filter((b) => (b.series || []).length).map((b, i) => ({
+          label: b.bot,
+          data: b.series.map((p) => ({ x: Date.parse(p.ts), y: p.equity / 1e6 })),
+          borderColor: PALETTE[i % PALETTE.length],
+          backgroundColor: PALETTE[i % PALETTE.length],
+          borderWidth: 1.5, pointRadius: 0, pointHoverRadius: 4, tension: 0.15,
+        }));
+        if (chart) chart.destroy();
+        chart = new Chart(ctx, {
+          type: "line",
+          data: { datasets },
+          options: {
+            responsive: true, maintainAspectRatio: false, animation: false,
+            interaction: { mode: "nearest", intersect: false },
+            plugins: {
+              legend: { labels: { color: "#9aa3b8", boxWidth: 12, font: { size: 11 } } },
+              tooltip: {
+                callbacks: {
+                  title: (items) => new Date(items[0].parsed.x).toLocaleString(),
+                  label: (it) => `${it.dataset.label}: $${it.parsed.y.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 4 })}`,
+                },
+              },
+            },
+            scales: {
+              x: { type: "linear", grid: { color: "#181c27" }, ticks: { color: "#6b7286", maxTicksLimit: 8, callback: (v) => new Date(v).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) } },
+              y: { grid: { color: "#181c27" }, ticks: { color: "#6b7286", callback: (v) => "$" + v.toLocaleString() } },
+            },
+          },
+        });
+      }
+
+      function render() {
+        if (!DATA) return;
+        const bots = DATA.bots.filter(botMatches);
+        const ids = new Set(bots.map((b) => b.bot));
+        document.getElementById("f-count").textContent = `${bots.length} / ${DATA.bots.length} bots`;
+
+        const agg = bots.reduce((a, b) => ({
+          pnl: a.pnl + (b.pnl ?? 0), volume: a.volume + b.volume, equity: a.equity + (b.equity ?? 0), trades: a.trades + b.trades,
+        }), { pnl: 0, volume: 0, equity: 0, trades: 0 });
         document.getElementById("cards").innerHTML =
-          card("Net PnL", usd(p.netPnl), sign(p.netPnl || 0)) +
-          card("Equity", usd(p.currentEquity)) +
-          card("Balance", usd(p.currentBalance)) +
-          card("Baskets", d.counts.baskets ?? 0) +
-          card("Open positions", (d.positions || []).length);
+          card("Net PnL", usd(agg.pnl), sign(agg.pnl)) +
+          card("Volume", usd(agg.volume)) +
+          card("Equity", usd(agg.equity)) +
+          card("Trades", agg.trades.toLocaleString()) +
+          card("Bots shown", `${bots.length}`);
 
-        chart(d.equitySeries || []);
+        drawChart(bots);
 
-        document.getElementById("positions").innerHTML = table(
-          [{ t: "Market", l: 1 }, { t: "Side" }, { t: "Size" }, { t: "Entry" }],
-          (d.positions || []).map((p) => [
-            { v: mkt(p.market), l: 1 }, { v: p.side, cls: p.side === "Buy" ? "buy" : "sell" },
-            { v: p.size }, { v: usd(p.entryPrice) },
+        document.getElementById("bots").innerHTML = table(
+          [{ t: "Bot", l: 1 }, { t: "Strategies", l: 1 }, { t: "Tags", l: 1 }, { t: "Markets" }, { t: "PnL" }, { t: "Volume" }, { t: "Trades" }, { t: "Equity" }, { t: "Last" }],
+          bots.sort((a, b) => (b.pnl ?? 0) - (a.pnl ?? 0)).map((b) => [
+            { v: `<span class="dot" style="background:${b.enabled === false ? "#555" : "#3ddc84"}"></span>${esc(b.bot)}`, l: 1 },
+            { v: esc((b.strategies || []).join(", ")) || "—", l: 1 },
+            { v: (b.tags || []).map((t) => `<span class="chip">${esc(t)}</span>`).join("") || "—", l: 1 },
+            { v: b.markets === "all" ? "all" : (b.markets || []).map(mkt).join(",") },
+            { v: usd(b.pnl), cls: sign(b.pnl ?? 0) },
+            { v: usd(b.volume) }, { v: b.trades }, { v: usd(b.equity) },
+            { v: fmtTs(b.lastTick) },
           ]),
         );
 
+        const strats = new Set();
+        bots.forEach((b) => (b.strategies || []).forEach((s) => strats.add(s)));
+        document.getElementById("logic").innerHTML = [...strats].map((s) =>
+          `<div class="logic"><b>${esc(s)}</b> — ${esc(DATA.strategyLogic[s] || "—")}</div>`).join("") || `<div class="muted">none</div>`;
+
+        const orders = DATA.recentOrders.filter((o) => ids.has(o.bot) &&
+          (F.strategy === "all" || o.strategy === F.strategy) &&
+          (F.market === "all" || String(o.market) === String(F.market) || ids.has(o.bot)));
         document.getElementById("orders").innerHTML = table(
-          [{ t: "Time", l: 1 }, { t: "Strategy", l: 1 }, { t: "Kind" }, { t: "Market" }, { t: "Side" }, { t: "Price" }, { t: "Qty" }, { t: "CheckTx" }],
-          (d.recentOrders || []).map((o) => [
-            { v: fmtTs(o.ts), l: 1 }, { v: o.strategy, l: 1 }, { v: o.kind },
-            { v: mkt(o.market) }, { v: o.side, cls: o.side === "Buy" ? "buy" : "sell" },
+          [{ t: "Time", l: 1 }, { t: "Bot", l: 1 }, { t: "Strategy", l: 1 }, { t: "Kind" }, { t: "Market" }, { t: "Side" }, { t: "Price" }, { t: "Qty" }, { t: "CheckTx" }],
+          orders.slice(0, 40).map((o) => [
+            { v: fmtTs(o.ts), l: 1 }, { v: esc(o.bot), l: 1 }, { v: esc(o.strategy), l: 1 }, { v: esc(o.kind) },
+            { v: esc(mkt(o.market)) }, { v: esc(o.side), cls: o.side === "Buy" ? "buy" : "sell" },
             { v: usd(o.price) }, { v: o.quantity }, { v: o.check_tx_code },
           ]),
         );
 
+        const decs = DATA.decisions.filter((d) => ids.has(d.bot) && (F.strategy === "all" || d.strategy === F.strategy));
         document.getElementById("decisions").innerHTML = table(
-          [{ t: "Strategy", l: 1 }, { t: "Action", l: 1 }, { t: "Count" }, { t: "Last" }],
-          (d.decisions || []).map((x) => [
-            { v: x.strategy, l: 1 }, { v: `<span class="chip">${x.action}</span>`, l: 1 },
-            { v: x.c }, { v: fmtTs(x.last) },
+          [{ t: "Bot", l: 1 }, { t: "Strategy", l: 1 }, { t: "Action", l: 1 }, { t: "Count" }, { t: "Last" }],
+          decs.slice(0, 60).map((d) => [
+            { v: esc(d.bot), l: 1 }, { v: esc(d.strategy), l: 1 }, { v: `<span class="chip">${esc(d.action)}</span>`, l: 1 },
+            { v: d.c }, { v: fmtTs(d.last) },
           ]),
         );
+      }
+
+      fetch("/api/stats").then((r) => r.json()).then((d) => {
+        if (!d.ok) { document.getElementById("cards").innerHTML = `<div class="card">stats unavailable: ${d.error || "?"}</div>`; return; }
+        DATA = d;
+        document.getElementById("asof").textContent = "as of " + fmtTs(d.asOf);
+        const strategies = [...new Set(d.bots.flatMap((b) => b.strategies || []))].sort();
+        const tags = [...new Set(d.bots.flatMap((b) => b.tags || []))].sort();
+        const markets = [...new Set(d.bots.flatMap((b) => (b.markets === "all" ? [] : b.markets || [])))].sort((a, b) => a - b);
+        fillSelect("f-bot", d.bots.map((b) => b.bot).sort(), "bots");
+        fillSelect("f-strategy", strategies, "strategies");
+        fillSelect("f-tag", tags, "tags");
+        fillSelect("f-market", markets.map(String), "markets");
+        render();
       }).catch((e) => {
         document.getElementById("cards").innerHTML = `<div class="card">failed to load: ${e}</div>`;
       });

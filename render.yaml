@@ -1,0 +1,37 @@
+# Render blueprint for the persistent multi-bot worker.
+# Create the service from this file, then set the two secret env vars
+# (DATABASE_URL, BOTS_ENC_KEY) in the Render dashboard — they are `sync: false`
+# so they are never committed. The bot roster lives in the Supabase registry
+# (`pnpm bots add ...`), so scaling bots needs NO redeploy.
+services:
+  - type: worker
+    name: proof-trading-bot-worker
+    runtime: node
+    plan: starter
+    region: oregon
+    autoDeploy: true
+    # devDependencies (tsx) are needed at runtime — do not set NODE_ENV=production.
+    buildCommand: corepack enable && pnpm install
+    startCommand: pnpm worker
+    envVars:
+      - key: PROOF_NETWORK
+        value: devnet
+      - key: PROOF_IMPACT_EVENT
+        value: "203"
+      - key: TICK_INTERVAL_MS
+        value: "3000"
+      - key: BOTS_REFRESH_MS
+        value: "30000"
+      - key: MARKET_CACHE_MS
+        value: "60000"
+      - key: DB_SCHEMA
+        value: proof_bot
+      - key: DRY_RUN
+        value: "0"
+      - key: LOG_LEVEL
+        value: info
+      # Secrets — set in the Render dashboard, never committed:
+      - key: DATABASE_URL
+        sync: false
+      - key: BOTS_ENC_KEY
+        sync: false

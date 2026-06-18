@@ -82,6 +82,12 @@ const EnvSchema = z.object({
     .regex(/^[a-z_][a-z0-9_]*$/, "DB_SCHEMA must be a bare lowercase identifier")
     .default("proof_bot"),
 
+  // ── Multi-bot worker / registry ──────────────────────────────────────────
+  /** Secret that encrypts bot private keys at rest in the registry (worker + CLI only). */
+  BOTS_ENC_KEY: z.string().min(1).optional(),
+  /** How often the worker re-reads the registry to hot-add/remove bots. */
+  BOTS_REFRESH_MS: z.coerce.number().int().positive().default(30_000),
+
   // ── Safety ───────────────────────────────────────────────────────────────
   DRY_RUN: z.preprocess(boolish, z.boolean()).default(false),
   CRON_SECRET: z.string().min(1).optional(),
@@ -124,6 +130,8 @@ export interface Config {
 
   databaseUrl?: string;
   dbSchema: string;
+  botsEncKey?: string;
+  botsRefreshMs: number;
   dryRun: boolean;
   cronSecret?: string;
 }
@@ -192,6 +200,8 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
 
     databaseUrl: e.DATABASE_URL,
     dbSchema: e.DB_SCHEMA,
+    botsEncKey: e.BOTS_ENC_KEY,
+    botsRefreshMs: e.BOTS_REFRESH_MS,
     dryRun: e.DRY_RUN,
     cronSecret: e.CRON_SECRET,
   };

@@ -1,5 +1,5 @@
 import { ExchangeClient, Side } from "@proof/trading-sdk";
-import type { AccountInfo, AtomicBasketLeg, MarketConfig, Orderbook, TxResult } from "@proof/trading-sdk";
+import type { AccountInfo, AtomicBasketLeg, Orderbook, TxResult } from "@proof/trading-sdk";
 import {
   createClient,
   placeLimitOrder,
@@ -9,8 +9,8 @@ import {
 } from "./client.js";
 import { loadWallet } from "./wallet.js";
 import type { Wallet } from "./wallet.js";
-import { discoverEventLegs } from "./impact.js";
 import type { EventLegs } from "./impact.js";
+import { MarketData } from "./market-data.js";
 import { snapPrice, snapQty, nextClientOrderId } from "./orders.js";
 import { checkAccount, newRiskState } from "./risk.js";
 import type { RiskState } from "./risk.js";
@@ -20,7 +20,6 @@ import type { Config } from "./config.js";
 import type { Logger } from "./logger.js";
 import type {
   BasketLegArg,
-  MarketMeta,
   PlaceArgs,
   Strategy,
   StrategyContext,
@@ -41,17 +40,6 @@ async function retry<T>(fn: () => Promise<T>, tries = 3, baseMs = 200): Promise<
   throw last;
 }
 
-function toMeta(m: MarketConfig): MarketMeta {
-  return {
-    market: m.market,
-    tickSize: m.tickSize ?? 0n,
-    lotSize: m.lotSize ?? 0n,
-    szDecimals: m.szDecimals ?? 0,
-    takerFeeBps: m.takerFeeBps,
-    makerFeeBps: m.makerFeeBps,
-  };
-}
-
 export interface TickSummary {
   halted: boolean;
   reason?: string;
@@ -59,66 +47,79 @@ export interface TickSummary {
   marginRatioBps?: string;
 }
 
-/** Stateful engine: one client+wallet+tracker shared across strategies. */
+/** Everything a single bot needs that the worker/caller injects (shared or per-bot). */
+export interface BotEngineDeps {
+  botId: string; // registry id, tags every record
+  wallet: Wallet; // this bot's own key
+  tracker: Tracker; // SHARED across bots — engine never closes it
+  marketData: MarketData; // SHARED — fetched once for all bots
+  events: number[]; // resolved impact events this bot trades
+}
+
+/**
+ * Stateful engine for ONE bot (one wallet / account). Strategies run against each
+ * of the bot's assigned markets every tick. The tracker + market data are shared
+ * across all bots (the worker owns their lifecycle); the wallet, client, kill-switch
+ * and submit-queue are per-bot.
+ */
 export class BotEngine {
-  private legs?: EventLegs;
-  private readonly metas = new Map<number, MarketMeta>();
-  private cacheAt = 0;
   private submitChain: Promise<unknown> = Promise.resolve();
   private lastSubmitMs = 0;
   private readonly riskState: RiskState = newRiskState();
   private halted = false;
 
   private constructor(
+    private readonly botId: string,
     private readonly config: Config,
     private readonly logger: Logger,
     private readonly strategies: Strategy[],
     private readonly client: ExchangeClient,
     private readonly wallet: Wallet,
     private readonly tracker: Tracker,
+    private readonly marketData: MarketData,
+    private readonly events: number[],
   ) {}
 
   static async create(
     config: Config,
     logger: Logger,
     strategies: Strategy[],
+    deps: BotEngineDeps,
   ): Promise<BotEngine> {
-    const wallet = await loadWallet(config, logger);
     const client = createClient(config);
-    client.setPrivateKey(wallet.privateKey);
-    const tracker = await createTracker(config, logger);
+    client.setPrivateKey(deps.wallet.privateKey);
     logger.info(
       {
-        address: wallet.address0x,
-        event: config.impactEvent,
+        bot: deps.botId,
+        address: deps.wallet.address0x,
+        events: deps.events,
         strategies: strategies.map((s) => s.name),
-        tracker: tracker.backend,
         dryRun: config.dryRun,
       },
       "engine: created",
     );
-    return new BotEngine(config, logger, strategies, client, wallet, tracker);
+    return new BotEngine(
+      deps.botId,
+      config,
+      logger,
+      strategies,
+      client,
+      deps.wallet,
+      deps.tracker,
+      deps.marketData,
+      deps.events,
+    );
   }
 
-  get eventLegs(): EventLegs | undefined {
-    return this.legs;
-  }
-
-  private async refreshCache(now: number): Promise<void> {
-    if (this.legs && now - this.cacheAt < this.config.marketCacheMs) return;
-    this.legs = await discoverEventLegs(this.config.gatewayUrl, this.config.impactEvent);
-    const markets = await this.client.queryMarkets();
-    this.metas.clear();
-    for (const m of markets) this.metas.set(m.market, toMeta(m));
-    this.cacheAt = now;
+  get id(): string {
+    return this.botId;
   }
 
   /**
    * Serialize submits so no two share a millisecond-timestamp nonce (code 21).
-   * Each call waits for the prior submit to settle (the chain always settles,
-   * resolved), then advances `lastSubmitMs` strictly forward — also covering a
-   * backwards clock. The caller sees the real result/error via `result`; the
-   * chain swallows so one failure can't poison the queue.
+   * Each call waits for the prior submit to settle, then advances `lastSubmitMs`
+   * strictly forward (also covering a backwards clock). The caller sees the real
+   * result via `result`; the chain swallows so one failure can't poison the queue.
    */
   private enqueueSubmit<T>(fn: () => Promise<T>): Promise<T> {
     const result = this.submitChain.then(async (): Promise<T> => {
@@ -140,8 +141,7 @@ export class BotEngine {
   async tick(): Promise<TickSummary> {
     if (this.halted) return { halted: true, reason: "halted" };
     const now = Date.now();
-    await this.refreshCache(now);
-    const legs = this.legs!;
+    await this.marketData.ensureFresh(now); // deduped — usually a no-op (worker refreshed)
 
     const account = await retry(() =>
       queryAccountViaInfo(this.config.gatewayUrl, this.wallet.address0x),
@@ -151,9 +151,10 @@ export class BotEngine {
 
     const verdict = checkAccount(account, this.riskState, this.config);
     if (!verdict.ok) {
-      this.logger.error({ reason: verdict.reason }, "RISK: kill-switch — cancelling all + halting");
+      this.logger.error({ bot: this.botId, reason: verdict.reason }, "RISK: kill-switch — cancelling all + halting");
       this.halted = true;
       void this.tracker.recordDecision({
+        bot: this.botId,
         ts: now,
         strategy: "risk",
         action: "kill-switch",
@@ -161,10 +162,9 @@ export class BotEngine {
       });
       if (!this.config.dryRun) {
         try {
-          // account-wide cancel — retried, since a failed kill-switch cancel leaves live orders.
           await retry(() => this.enqueueSubmit(() => cancelAllOrders(this.client, this.wallet)), 3, 300);
         } catch (err) {
-          this.logger.error({ err: (err as Error).message }, "kill-switch cancel FAILED after retries");
+          this.logger.error({ bot: this.botId, err: (err as Error).message }, "kill-switch cancel FAILED after retries");
         }
       }
       return { halted: true, reason: verdict.reason, equity: verdict.equity.toString() };
@@ -172,10 +172,17 @@ export class BotEngine {
 
     const view = account ? { positions: account.positions, equity: account.equity } : null;
     for (const strat of this.strategies) {
-      try {
-        await strat.onTick(this.buildContext(strat, legs, view, now));
-      } catch (err) {
-        this.logger.error({ strategy: strat.name, err: (err as Error).message }, "strategy tick error");
+      for (const ev of this.events) {
+        const legs = this.marketData.legsFor(ev);
+        if (!legs) continue;
+        try {
+          await strat.onTick(this.buildContext(strat, legs, view, now));
+        } catch (err) {
+          this.logger.error(
+            { bot: this.botId, strategy: strat.name, event: ev, err: (err as Error).message },
+            "strategy tick error",
+          );
+        }
       }
     }
     return {
@@ -188,6 +195,7 @@ export class BotEngine {
   private async recordSnapshot(account: AccountInfo, now: number): Promise<void> {
     try {
       await this.tracker.recordSnapshot({
+        bot: this.botId,
         ts: now,
         balance: account.balance.toString(),
         equity: account.equity.toString(),
@@ -210,7 +218,7 @@ export class BotEngine {
     account: StrategyContext["account"],
     now: number,
   ): StrategyContext {
-    const slog = this.logger.child({ strategy: strat.name });
+    const slog = this.logger.child({ bot: this.botId, strategy: strat.name, event: legs.impactId });
     return {
       name: strat.name,
       config: this.config,
@@ -219,23 +227,30 @@ export class BotEngine {
       legs,
       account,
       nowMs: now,
-      marketMeta: (m) => this.metas.get(m),
+      marketMeta: (m) => this.marketData.metaFor(m),
       orderbook: (m) => retry<Orderbook>(() => this.client.queryOrderbook(m)),
       positionFor: (m) => account?.positions.find((p) => p.market === m),
       place: (p) => this.place(strat.name, p),
       cancelMarket: (m) => this.cancelMarket(m),
       basket: (l, s) => this.basket(strat.name, l, s),
       recordDecision: (action, detail) => {
-        void this.tracker.recordDecision({ ts: Date.now(), strategy: strat.name, action, detail });
+        void this.tracker.recordDecision({
+          bot: this.botId,
+          ts: Date.now(),
+          strategy: strat.name,
+          action,
+          market: legs.impactId,
+          detail,
+        });
         slog.debug({ action, ...detail }, `${strat.name}: ${action}`);
       },
     };
   }
 
   private async place(strategy: string, p: PlaceArgs): Promise<TxResult | null> {
-    const meta = this.metas.get(p.market);
+    const meta = this.marketData.metaFor(p.market);
     if (!meta) {
-      this.logger.warn({ market: p.market }, "place: no market meta");
+      this.logger.warn({ bot: this.botId, market: p.market }, "place: no market meta");
       return null;
     }
     const side: "Buy" | "Sell" = p.side === Side.Buy ? "Buy" : "Sell";
@@ -243,13 +258,13 @@ export class BotEngine {
     let qty = snapQty(p.quantity, meta.lotSize);
     if (qty > this.config.maxOrderQty) qty = snapQty(this.config.maxOrderQty, meta.lotSize);
     if (qty <= 0n || price <= 0n) {
-      this.logger.warn({ market: p.market, qty: qty.toString() }, "place: skipped after snap (zero qty/price)");
+      this.logger.warn({ bot: this.botId, market: p.market, qty: qty.toString() }, "place: skipped after snap (zero qty/price)");
       return null;
     }
     const coid = nextClientOrderId();
     if (this.config.dryRun) {
       void this.recordOrder(strategy, "order", p.market, side, price, qty, coid, undefined, undefined, "dry-run");
-      this.logger.info({ strategy, market: p.market, side, price: price.toString(), qty: qty.toString() }, "DRY_RUN place");
+      this.logger.info({ bot: this.botId, strategy, market: p.market, side, price: price.toString(), qty: qty.toString() }, "DRY_RUN place");
       return null;
     }
     const res = await this.enqueueSubmit(() =>
@@ -279,9 +294,9 @@ export class BotEngine {
   ): Promise<TxResult | null> {
     const snapped: AtomicBasketLeg[] = [];
     for (const l of legsArg) {
-      const meta = this.metas.get(l.market);
+      const meta = this.marketData.metaFor(l.market);
       if (!meta) {
-        this.logger.warn({ market: l.market }, "basket: no meta — aborting");
+        this.logger.warn({ bot: this.botId, market: l.market }, "basket: no meta — aborting");
         return null;
       }
       const side: "Buy" | "Sell" = l.side === Side.Buy ? "Buy" : "Sell";
@@ -289,7 +304,7 @@ export class BotEngine {
       let qty = snapQty(l.quantity, meta.lotSize);
       if (qty > this.config.maxOrderQty) qty = snapQty(this.config.maxOrderQty, meta.lotSize);
       if (qty <= 0n || price <= 0n) {
-        this.logger.warn({ market: l.market }, "basket: zero qty/price after snap — aborting");
+        this.logger.warn({ bot: this.botId, market: l.market }, "basket: zero qty/price after snap — aborting");
         return null;
       }
       snapped.push({
@@ -306,7 +321,7 @@ export class BotEngine {
         const side: "Buy" | "Sell" = l.side === Side.Buy ? "Buy" : "Sell";
         void this.recordOrder(strategy, "basket", l.market, side, l.price, l.quantity, l.clientOrderId ?? 0n, undefined, undefined, "dry-run");
       }
-      this.logger.info({ strategy, legs: snapped.length }, "DRY_RUN basket");
+      this.logger.info({ bot: this.botId, strategy, legs: snapped.length }, "DRY_RUN basket");
       return null;
     }
     const res = await this.enqueueSubmit(() => placeBasket(this.client, this.wallet, snapped, maxSlippageBps));
@@ -331,6 +346,7 @@ export class BotEngine {
   ): Promise<void> {
     try {
       await this.tracker.recordOrder({
+        bot: this.botId,
         clientOrderId: coid.toString(),
         strategy,
         kind,
@@ -348,35 +364,59 @@ export class BotEngine {
     }
   }
 
-  /** Tear down WITHOUT cancelling (serverless: let resting orders persist between ticks). */
-  async dispose(): Promise<void> {
+  /** Tear down WITHOUT cancelling (serverless: let resting orders persist). Does NOT close the shared tracker. */
+  dispose(): void {
     this.client.disconnect();
-    await this.tracker.close();
   }
 
-  /** Full shutdown: cancel everything, run strategy shutdowns, close. */
+  /** Full shutdown: cancel everything, run strategy shutdowns, disconnect. Does NOT close the shared tracker. */
   async shutdown(): Promise<void> {
     if (!this.config.dryRun) {
       try {
         await this.enqueueSubmit(() => cancelAllOrders(this.client, this.wallet));
       } catch (err) {
-        this.logger.error({ err: (err as Error).message }, "shutdown cancel failed");
+        this.logger.error({ bot: this.botId, err: (err as Error).message }, "shutdown cancel failed");
       }
     }
-    if (this.legs) {
+    const legs = this.events.map((e) => this.marketData.legsFor(e)).find(Boolean);
+    if (legs) {
       for (const s of this.strategies) {
         if (s.shutdown) {
           try {
-            await s.shutdown(this.buildContext(s, this.legs, null, Date.now()));
+            await s.shutdown(this.buildContext(s, legs, null, Date.now()));
           } catch (err) {
-            this.logger.error({ strategy: s.name, err: (err as Error).message }, "strategy shutdown error");
+            this.logger.error({ bot: this.botId, strategy: s.name, err: (err as Error).message }, "strategy shutdown error");
           }
         }
       }
     }
     this.client.disconnect();
-    await this.tracker.close();
   }
+}
+
+/**
+ * Assemble a single "main" bot from env config (used by the Vercel cron tick and
+ * the local `pnpm run` loop). The multi-bot worker builds engines directly.
+ */
+async function assembleSingleBot(
+  config: Config,
+  logger: Logger,
+  strategies: Strategy[],
+): Promise<{ engine: BotEngine; tracker: Tracker; readClient: ExchangeClient }> {
+  const wallet = await loadWallet(config, logger);
+  const tracker = await createTracker(config, logger);
+  const readClient = createClient(config);
+  const marketData = new MarketData(config.gatewayUrl, readClient, config.marketCacheMs);
+  marketData.setEvents([config.impactEvent]);
+  await marketData.ensureFresh();
+  const engine = await BotEngine.create(config, logger, strategies, {
+    botId: "main",
+    wallet,
+    tracker,
+    marketData,
+    events: [config.impactEvent],
+  });
+  return { engine, tracker, readClient };
 }
 
 /** One-shot tick (Vercel cron / scheduled). Does NOT cancel resting orders on exit. */
@@ -385,27 +425,36 @@ export async function executeTick(
   logger: Logger,
   strategies: Strategy[],
 ): Promise<TickSummary> {
-  const engine = await BotEngine.create(config, logger, strategies);
+  const { engine, tracker, readClient } = await assembleSingleBot(config, logger, strategies);
   try {
     return await engine.tick();
   } finally {
-    await engine.dispose();
+    engine.dispose();
+    readClient.disconnect();
+    await tracker.close();
   }
 }
 
-/** Long-lived loop (server/VM). Ticks every TICK_INTERVAL_MS; flattens on SIGINT/SIGTERM. */
+/** Long-lived single-bot loop (server/VM). Ticks every TICK_INTERVAL_MS; flattens on SIGINT/SIGTERM. */
 export async function runBot(
   config: Config,
   logger: Logger,
   strategies: Strategy[],
 ): Promise<void> {
-  const engine = await BotEngine.create(config, logger, strategies);
+  const { engine, tracker, readClient } = await assembleSingleBot(config, logger, strategies);
   logger.info({ tickMs: config.tickIntervalMs }, "bot: starting loop");
 
   let stopping = false;
+  let ticking = false;
   const timer = setInterval(() => {
-    if (stopping) return;
-    void engine.tick().catch((err) => logger.error({ err: (err as Error).message }, "tick error"));
+    if (stopping || ticking) return; // no self-overlap if a tick outlasts the interval
+    ticking = true;
+    void engine
+      .tick()
+      .catch((err) => logger.error({ err: (err as Error).message }, "tick error"))
+      .finally(() => {
+        ticking = false;
+      });
   }, config.tickIntervalMs);
 
   await new Promise<void>((resolve) => {
@@ -415,6 +464,8 @@ export async function runBot(
       logger.info({ sig }, "bot: shutting down — flattening");
       clearInterval(timer);
       await engine.shutdown();
+      readClient.disconnect();
+      await tracker.close();
       resolve();
     };
     process.once("SIGINT", () => void shutdown("SIGINT"));

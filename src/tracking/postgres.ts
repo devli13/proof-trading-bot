@@ -29,7 +29,10 @@ create table if not exists ${schema}.bot_orders (
   note text,
   ts timestamptz not null default now()
 );
+alter table ${schema}.bot_orders add column if not exists bot text not null default 'main';
+create index if not exists bot_orders_bot_ts_idx on ${schema}.bot_orders (bot, ts);
 create index if not exists bot_orders_strategy_ts_idx on ${schema}.bot_orders (strategy, ts);
+
 create table if not exists ${schema}.bot_snapshots (
   id bigserial primary key,
   balance text not null,
@@ -38,12 +41,28 @@ create table if not exists ${schema}.bot_snapshots (
   positions jsonb not null default '[]',
   ts timestamptz not null default now()
 );
+alter table ${schema}.bot_snapshots add column if not exists bot text not null default 'main';
+create index if not exists bot_snapshots_bot_ts_idx on ${schema}.bot_snapshots (bot, ts);
+
 create table if not exists ${schema}.bot_decisions (
   id bigserial primary key,
   strategy text not null,
   action text not null,
   detail jsonb not null default '{}',
   ts timestamptz not null default now()
+);
+alter table ${schema}.bot_decisions add column if not exists bot text not null default 'main';
+alter table ${schema}.bot_decisions add column if not exists market int;
+
+create table if not exists ${schema}.bots (
+  id text primary key,
+  strategies text[] not null default '{}',
+  markets jsonb not null default '"all"',
+  tags text[] not null default '{}',
+  private_key_enc text not null,
+  params jsonb not null default '{}',
+  enabled boolean not null default true,
+  created_at timestamptz not null default now()
 );
 `;
 }
@@ -70,7 +89,7 @@ export class PostgresTracker implements Tracker {
   ): Promise<PostgresTracker> {
     const { default: postgres } = await import("postgres");
     const sql = postgres(databaseUrl, {
-      max: 2,
+      max: 10, // shared across all concurrent bots in the worker — avoid write contention
       idle_timeout: 20,
       connect_timeout: 10,
       prepare: false, // transaction-pooler friendly
@@ -94,6 +113,7 @@ export class PostgresTracker implements Tracker {
   async recordOrder(o: OrderRecord): Promise<void> {
     try {
       await this.sql`insert into ${this.table("bot_orders")} ${this.sql({
+        bot: o.bot,
         client_order_id: o.clientOrderId,
         strategy: o.strategy,
         kind: o.kind,
@@ -114,6 +134,7 @@ export class PostgresTracker implements Tracker {
   async recordSnapshot(s: PositionSnapshot): Promise<void> {
     try {
       await this.sql`insert into ${this.table("bot_snapshots")} ${this.sql({
+        bot: s.bot,
         balance: s.balance,
         equity: s.equity,
         margin_ratio_bps: s.marginRatioBps,
@@ -128,8 +149,10 @@ export class PostgresTracker implements Tracker {
   async recordDecision(d: DecisionRecord): Promise<void> {
     try {
       await this.sql`insert into ${this.table("bot_decisions")} ${this.sql({
+        bot: d.bot,
         strategy: d.strategy,
         action: d.action,
+        market: d.market ?? null,
         detail: this.sql.json(d.detail as never), // jsonb, not a stringified scalar
         ts: new Date(d.ts).toISOString(),
       })}`;

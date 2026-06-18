@@ -24,6 +24,11 @@ export interface Wallet {
   source: WalletSource;
 }
 
+/** Build a Wallet directly from a hex private key (used by the multi-bot worker). */
+export function walletFromPrivateKey(privHex: string): Wallet {
+  return fromPrivateKey(privHex, "byo");
+}
+
 function fromPrivateKey(privHex: string, source: WalletSource): Wallet {
   const privateKey = hexToBytes(privHex.replace(/^0x/, ""));
   const publicKey = getPublicKey(privateKey);

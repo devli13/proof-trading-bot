@@ -6,6 +6,7 @@
  */
 
 export interface OrderRecord {
+  bot: string; // which bot/wallet (registry id)
   clientOrderId: string; // bigint serialized
   strategy: string;
   kind: "order" | "basket";
@@ -27,6 +28,7 @@ export interface PositionRow {
 }
 
 export interface PositionSnapshot {
+  bot: string;
   ts: number;
   balance: string;
   equity: string;
@@ -35,9 +37,11 @@ export interface PositionSnapshot {
 }
 
 export interface DecisionRecord {
+  bot: string;
   ts: number;
   strategy: string;
   action: string;
+  market?: number;
   detail: Record<string, unknown>;
 }
 
