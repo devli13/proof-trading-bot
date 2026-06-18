@@ -14,11 +14,16 @@ git submodule).
   the 1,310 markets, reads orderbooks/health. `pnpm typecheck` + `pnpm test` green.
 - ✅ **Wallet + funding plumbing** — `wallet`/`fund` CLI commands; supports a
   bring-your-own key, the beta-challenge access-code redeem, and the faucet token.
-- 🟡 **Funding blocked by a backend/SDK issue** — a wallet redeemed for the beta
-  challenge (`beta.proof.trade`) is **`not found`** on the documented gateway
-  (`api.dev.proof.trade` / `exchange-devnet-1`), so it can't trade yet. Details +
-  repro in [`PROOF_SDK_FEEDBACK.md`](./PROOF_SDK_FEEDBACK.md) (issue #1). Likely a
-  different gateway/chain for the beta challenge — pending confirmation from Proof.
+- ✅ **Funded wallet can place orders** — confirmed against a $10k beta account:
+  `submitTx` for `PlaceOrder`/`CancelAllOrders` returns **CheckTx code 0**. The
+  gateway is the *same* `api.dev.proof.trade` / `exchange-devnet-1` the SDK
+  defaults to (verified from the beta web app's own bundle).
+- 🟡 **SDK read endpoints are broken on this gateway** — `queryAccount` /
+  `queryOpenOrders` (`GET /v1/account/<hex>`) return `404 not found` for the
+  funded account, and `submitTxCommit`'s `/tx` confirm-poll times out, even though
+  the web app reads it fine (via `/info`). So the bot can trade but can't read its
+  balance/positions/fills via the SDK. Full repro in
+  [`PROOF_SDK_FEEDBACK.md`](./PROOF_SDK_FEEDBACK.md) (#1, #1b) — reported to Proof.
 - 🟡 **Vercel deploy** — live at `asymmetra/proof-trading-bot`; cron + functions
   wired. Fixing an ESM bundling issue in the serverless functions (see the Vercel
   section). Root `/` is a status page; the bot runs at `/api/tick` (cron) and
@@ -76,12 +81,12 @@ needs funds. Three paths, in precedence order:
 Keys live in `KEYSTORE_PATH` (default `.keys/devnet.json`, gitignored) — never
 committed.
 
-> ⚠️ **Known blocker:** a wallet redeemed for the beta challenge currently reads
-> back as `not found` on `api.dev.proof.trade`. See
-> [`PROOF_SDK_FEEDBACK.md`](./PROOF_SDK_FEEDBACK.md) #1 — likely a different
-> gateway/chain for the challenge. Once the correct gateway is known, set
-> `PROOF_NETWORK=custom` + `PROOF_GATEWAY_URL` + `PROOF_CHAIN_ID` + `PROOF_ALLOW_REAL=1`
-> (or we add a `beta` preset in `src/config.ts`).
+> ⚠️ **Known issue:** the beta challenge runs on the SDK's default gateway
+> (`api.dev.proof.trade` / `exchange-devnet-1`), and the funded wallet **can place
+> orders** — but the SDK's account-read endpoints (`GET /v1/account/<hex>`,
+> open-orders) return `404 not found`, so the bot can't read balance/positions via
+> the SDK. The web app reads via `/info` instead. See
+> [`PROOF_SDK_FEEDBACK.md`](./PROOF_SDK_FEEDBACK.md) #1/#1b (reported to Proof).
 
 ## Commands
 

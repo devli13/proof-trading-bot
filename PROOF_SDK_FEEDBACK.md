@@ -53,21 +53,54 @@ the `address` the redeem endpoint returned (`0x5eed014f...286f7`). So we are
 querying the right address; it simply has no account record on
 `api.dev.proof.trade` / `exchange-devnet-1`.
 
-**Hypotheses (for the Proof team to confirm):**
-- The beta challenge funds accounts on a **different gateway/chain** than the
-  `exchange-devnet-1` / `api.dev.proof.trade` that `PAPER-TRADING.md` Step 4
-  points participants to. If so, what gateway URL + chain id should challenge
-  participants use?
-- Or the funding deposit is **delayed / failed silently** in the redeem pipeline
-  (the announcement notes this is an MVP). A failed drip is supposed to release
-  the code (per the redeem error table), but we got HTTP 200 with a key.
+**Root cause (confirmed):** It is **not** a gateway mismatch. The beta web app's
+own JS bundle (`beta.proof.trade`) references only `https://api.dev.proof.trade`
+and chain `exchange-devnet-1` — the **same** gateway/chain the SDK defaults to.
+The account is genuinely funded there (the web app shows `$10,000.00`), and
+**writes succeed** against it (see #1b). The problem is specifically the SDK's
+**account-read REST endpoint**:
 
-**What we need:** The correct gateway URL + chain id for the beta challenge (or
-confirmation that funding lands on `api.dev.proof.trade`), so the funded wallet
-becomes queryable/tradeable.
+- SDK `queryAccount()` → `GET /v1/account/<hex>` (client.ts:772) → `HTTP 404
+  {"status":"error","error":"not found"}` for the funded address, **with and
+  without** the `0x` prefix.
+- `queryOpenOrders()` likewise → `API error: not found`.
+- Meanwhile the web app reads the same account fine via **`/info`** (request
+  types seen in the bundle include `clearinghouseState`, `account`) and
+  **`/portfolio`** — NOT via `/v1/account/<hex>`.
 
-**Impact:** Blocks the entire participant flow — with no readable balance, no
-orders can be placed.
+So `/v1/account/<hex>` (the endpoint the whole `queryAccount`/`queryBalance`/
+`queryEquity` surface is built on) appears **deprecated, not populated for
+web-funded accounts, or replaced by `/info`** — while the SDK still points at it.
+
+**What we need:** Either fix `/v1/account/<hex>` to return web-funded accounts, or
+update the SDK's `queryAccount`/`queryOpenOrders` to use the `/info` mechanism the
+web app uses (and document the `/info` request/response shape).
+
+**Impact:** **Critical** for read flows — a bot can't read its balance, positions,
+or open orders via the SDK, even though the account is funded and **can place
+orders** (#1b). We worked around it by not gating order submission on the
+(failing) balance read.
+
+---
+
+## #1b — `submitTxCommit` confirm-poll times out; `submitTx` (CheckTx) works · **High**
+
+**What:** Order submission **broadcasts successfully** (returns a tx hash, and
+`submitTx` returns **CheckTx code 0** = admitted), but `submitTxCommit()` then
+**times out polling `/tx` after 9s** (`code:-1, log:"submitTxCommit: timed out
+polling /tx after 9s"`) — so it can never confirm DeliverTx/inclusion via the
+documented commit path. Reproduced on multiple markets (HYPE m7, BTC m1).
+
+**Reproduce:** With a funded key, `await client.submitTxCommit({type:"PlaceOrder",…})`
+→ returns `code:-1` timeout despite a valid tx hash. The same action via
+`client.submitTx(…)` returns `code:0` immediately.
+
+**Workaround:** Use `submitTx` (fire-and-forget CheckTx) and verify out-of-band.
+But then there's **no SDK way to confirm execution** (the `/tx` poll and
+`queryOpenOrders` both fail), so a bot is flying blind on whether its order rested.
+
+**What we need:** A working inclusion/confirmation read (fix `/tx` polling, or a
+documented `/info`-based order/fill query), so bots can confirm orders.
 
 ---
 
@@ -137,8 +170,11 @@ Interpreted as cents (1e2) → bestBid ≈ $646,115,000 (impossible for BTC).
 Interpreted as micro-USDC (1e6) → bestBid = $64,611.50, ask = $64,623.69,
 spread ≈ $12 (~1.9 bps) — a sane BTC quote.
 
-**So prices appear to be 1e6-scaled, not 1e2 ("cents").** The two unit systems
-("cents" in prose, "micro-USDC" in `tickSize`) coexist in the SDK and conflict.
+**Confirmed against the web app:** `queryOrderbook(7)` (HYPE) returns bestBid
+`72020000`; the beta web app displays HYPE at **$72.02** at the same moment.
+`72020000 / 1e6 = 72.02` ✓. So prices are unambiguously **1e6-scaled
+(micro-USDC), not 1e2 ("cents")**. The two unit systems ("cents" in prose,
+"micro-USDC" in `tickSize`) coexist in the SDK and conflict.
 
 **Please clarify:** What is the canonical price scale? Is it uniform across
 markets, or per-market via `tickSize` / `szDecimals`? The "integer cents (2 dp)"
@@ -204,4 +240,8 @@ These weren't clear from the README / `AGENTS.md` / `PAPER-TRADING.md`:
 - Key handling (`generateKeypair`, `getPublicKey`, `pubkeyToOwner`, `ownerToHex`,
   `hexToBytes`) is clean and the derivation matches the server.
 - The access-code redeem endpoint itself responded correctly (HTTP 200 + key).
+- **The write path works:** signing + `submitTx` for `PlaceOrder` and
+  `CancelAllOrders` returns **CheckTx code 0** against the funded account on every
+  attempt — the codec/signing/v3-envelope path is solid. (Only the read/confirm
+  side, #1 and #1b, is broken.)
 - `bigint`-everywhere units and the typed action set are easy to build against.
