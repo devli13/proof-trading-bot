@@ -58,6 +58,9 @@ const EnvSchema = z.object({
   ARB_MIN_EDGE_BPS: z.coerce.number().int().positive().default(25),
   ARB_VOID_SAFETY_BPS: z.coerce.number().int().nonnegative().default(50),
   ARB_CONDITIONAL_ENABLED: z.preprocess(boolish, z.boolean()).default(false),
+  /** Max |position| per binary leg (qty units; 100 = 1 contract). Past this the
+   *  arb only takes inventory-REDUCING baskets, so net position can't drift. */
+  ARB_MAX_POSITION: z.coerce.bigint().default(500n),
 
   // ── Risk / kill-switch ───────────────────────────────────────────────────
   MIN_MARGIN_RATIO_BPS: z.coerce.number().int().nonnegative().default(2000), // 20%
@@ -108,6 +111,7 @@ export interface Config {
   arbMinEdgeBps: number;
   arbVoidSafetyBps: number;
   arbConditionalEnabled: boolean;
+  arbMaxPosition: bigint;
 
   minMarginRatioBps: number;
   maxDrawdownBps: number;
@@ -175,6 +179,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     arbMinEdgeBps: e.ARB_MIN_EDGE_BPS,
     arbVoidSafetyBps: e.ARB_VOID_SAFETY_BPS,
     arbConditionalEnabled: e.ARB_CONDITIONAL_ENABLED,
+    arbMaxPosition: e.ARB_MAX_POSITION,
 
     minMarginRatioBps: e.MIN_MARGIN_RATIO_BPS,
     maxDrawdownBps: e.MAX_DRAWDOWN_BPS,

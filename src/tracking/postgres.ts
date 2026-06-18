@@ -117,7 +117,7 @@ export class PostgresTracker implements Tracker {
         balance: s.balance,
         equity: s.equity,
         margin_ratio_bps: s.marginRatioBps,
-        positions: JSON.stringify(s.positions),
+        positions: this.sql.json(s.positions as never), // jsonb (not a stringified scalar)
         ts: new Date(s.ts).toISOString(),
       })}`;
     } catch (err) {
@@ -130,7 +130,7 @@ export class PostgresTracker implements Tracker {
       await this.sql`insert into ${this.table("bot_decisions")} ${this.sql({
         strategy: d.strategy,
         action: d.action,
-        detail: JSON.stringify(d.detail),
+        detail: this.sql.json(d.detail as never), // jsonb, not a stringified scalar
         ts: new Date(d.ts).toISOString(),
       })}`;
     } catch (err) {
