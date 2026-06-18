@@ -3,7 +3,8 @@ import {
   createClient,
   placeLimitOrder,
   cancelAllOrders,
-  queryAccountSafe,
+  queryAccountViaInfo,
+  queryOpenOrdersSafe,
 } from "./client.js";
 import { loadWallet } from "./wallet.js";
 import { requestFaucetDrip } from "./faucet.js";
@@ -43,8 +44,10 @@ export async function runSmoke(config: Config, logger: Logger): Promise<void> {
   client.setPrivateKey(wallet.privateKey);
   logger.info({ address: wallet.address0x, source: wallet.source }, "smoke: wallet");
 
-  // 4. Account (funded-ness is determined by the on-chain balance, not the key source)
-  let account = await queryAccountSafe(client);
+  // 4. Account (funded-ness is determined by the on-chain balance, not the key
+  //    source). Read via /info clearinghouseState — the SDK's queryAccount
+  //    (/v1/account) 404s on this gateway; see PROOF_SDK_FEEDBACK.md #1.
+  let account = await queryAccountViaInfo(config.gatewayUrl, wallet.address0x);
 
   // 5. Top up via the privileged faucet only if we have a token and no balance yet.
   if (
@@ -60,7 +63,7 @@ export async function runSmoke(config: Config, logger: Logger): Promise<void> {
     });
     if (drip.funded) {
       await sleep(3000); // wait for the deposit to land on chain
-      account = await queryAccountSafe(client);
+      account = await queryAccountViaInfo(config.gatewayUrl, wallet.address0x);
     }
   }
 
@@ -112,12 +115,13 @@ export async function runSmoke(config: Config, logger: Logger): Promise<void> {
       postOnly: true,
     });
     logger.info(
-      { code: placed.code, hash: placed.hash, height: placed.height, log: placed.log },
-      placed.code === 0 ? "smoke: order landed ✓" : "smoke: order rejected",
+      { code: placed.code, hash: placed.hash, log: placed.log },
+      placed.code === 0 ? "smoke: order accepted (CheckTx) ✓" : "smoke: order rejected",
     );
 
-    const open = await client.queryOpenOrders();
-    logger.info({ openOrders: open.length }, "smoke: open orders");
+    // Note: open-orders read may be unavailable on this gateway (returns []).
+    const open = await queryOpenOrdersSafe(client);
+    logger.info({ openOrders: open.length }, "smoke: open orders (read may be unavailable)");
 
     const cancelled = await cancelAllOrders(client, wallet, market);
     logger.info(

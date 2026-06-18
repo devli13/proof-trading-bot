@@ -1,7 +1,7 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
 import { loadConfig } from "../src/config.js";
 import { createLogger } from "../src/logger.js";
-import { createClient, queryAccountSafe } from "../src/client.js";
+import { createClient, queryAccountViaInfo } from "../src/client.js";
 import { loadWallet } from "../src/wallet.js";
 import { formatMicroUsdc } from "../src/units.js";
 
@@ -24,7 +24,7 @@ export default async function handler(
     try {
       const wallet = await loadWallet(config, logger);
       client.setPrivateKey(wallet.privateKey);
-      const a = await queryAccountSafe(client);
+      const a = await queryAccountViaInfo(config.gatewayUrl, wallet.address0x);
       if (a) {
         account = {
           address: wallet.address0x,

@@ -4,7 +4,8 @@ import {
   createClient,
   placeLimitOrder,
   cancelAllOrders,
-  queryAccountSafe,
+  queryAccountViaInfo,
+  queryOpenOrdersSafe,
 } from "./client.js";
 import { loadWallet } from "./wallet.js";
 import type { Wallet } from "./wallet.js";
@@ -45,8 +46,8 @@ async function buildContext(config: Config, logger: Logger): Promise<BuiltContex
     logger,
     markets: () => client.queryMarkets(),
     orderbook: (m) => client.queryOrderbook(m),
-    account: () => queryAccountSafe(client),
-    openOrders: () => client.queryOpenOrders(),
+    account: () => queryAccountViaInfo(config.gatewayUrl, wallet.address0x),
+    openOrders: () => queryOpenOrdersSafe(client),
     placeLimit: (p) => guardedPlace(client, wallet, config, logger, p),
     cancelAll: (m) => cancelAllOrders(client, wallet, m),
   };
@@ -70,7 +71,7 @@ async function guardedPlace(
       `order qty ${p.quantity} exceeds MAX_ORDER_QTY ${config.maxOrderQty}`,
     );
   }
-  const open = await client.queryOpenOrders();
+  const open = await queryOpenOrdersSafe(client);
   if (open.length >= config.maxOpenOrders) {
     logger.warn(
       { open: open.length, cap: config.maxOpenOrders },

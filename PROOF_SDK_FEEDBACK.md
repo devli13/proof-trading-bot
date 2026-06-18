@@ -72,9 +72,27 @@ So `/v1/account/<hex>` (the endpoint the whole `queryAccount`/`queryBalance`/
 `queryEquity` surface is built on) appears **deprecated, not populated for
 web-funded accounts, or replaced by `/info`** — while the SDK still points at it.
 
+**Workaround we found (works — likely the fix):** `POST {gateway}/info` with body
+`{"type":"clearinghouseState","user":"0x<addr>"}` returns the funded account —
+HTTP 200, body `{"data":"<base64 msgpack>"}`. Decoding the base64→msgpack yields
+the **same array layout `queryAccount` already decodes**:
+`[balance, positions, equity, totalMm, totalIm, marginRatioBps, bindingScenario,
+feesAccrued, volume30d, <extra[9]>]`. Our $10,000 account decodes to
+`balance=10000000000`, `equity=10000000000` (micro-USDC) ✓. Gotchas:
+- `user` must be **0x-prefixed** (the SDK's `ownerToHex` is un-prefixed).
+- `{"type":"account",…}` returns `400 {"error":"invalid info request"}` — the type
+  is `clearinghouseState`, field is `user` (not `address`).
+- index `[9]` is an extra field not in the SDK's parser (equals `balance` for a
+  fresh account — possibly free/withdrawable collateral?). Please document it.
+
+So the cleanest SDK fix is to point `queryAccount` (and the open-orders read) at
+`POST /info` — the path the web app already uses — instead of
+`GET /v1/account/<hex>`. We've done exactly this in our bot as a workaround and it
+restores full balance/equity/position reads.
+
 **What we need:** Either fix `/v1/account/<hex>` to return web-funded accounts, or
-update the SDK's `queryAccount`/`queryOpenOrders` to use the `/info` mechanism the
-web app uses (and document the `/info` request/response shape).
+update the SDK to read account/orders via `/info` (and document its request/response
+shape + the `[9]` field + whether an `openOrders` info type exists).
 
 **Impact:** **Critical** for read flows — a bot can't read its balance, positions,
 or open orders via the SDK, even though the account is funded and **can place

@@ -1,4 +1,4 @@
-import { createClient, queryAccountSafe } from "./client.js";
+import { createClient, queryAccountViaInfo } from "./client.js";
 import { loadWallet, generateWallet } from "./wallet.js";
 import { requestFaucetDrip } from "./faucet.js";
 import { formatMicroUsdc } from "./units.js";
@@ -50,7 +50,7 @@ export async function fundCommand(config: Config, logger: Logger): Promise<void>
 
   if (drip.funded) {
     await new Promise((r) => setTimeout(r, 3000)); // let the deposit land
-    const account = await queryAccountSafe(client);
+    const account = await queryAccountViaInfo(config.gatewayUrl, wallet.address0x);
     logger.info(
       {
         address: wallet.address0x,

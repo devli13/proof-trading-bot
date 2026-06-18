@@ -23,6 +23,7 @@
     "format": "prettier --write ."
   },
   "dependencies": {
+    "@msgpack/msgpack": "^3.0.0-beta.3",
     "@proof/trading-sdk": "link:./vendor/trading-sdk",
     "dotenv": "^16.4.7",
     "pino": "^9.5.0",
@@ -38,6 +39,8 @@
     "vitest": "^4.0.0"
   },
   "pnpm": {
-    "onlyBuiltDependencies": ["esbuild"]
+    "onlyBuiltDependencies": [
+      "esbuild"
+    ]
   }
 }
