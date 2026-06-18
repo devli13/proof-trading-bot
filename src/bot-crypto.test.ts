@@ -3,7 +3,8 @@ import { encryptSecret, decryptSecret } from "./bot-crypto.js";
 
 describe("bot-crypto", () => {
   const key = "test-enc-key-123";
-  const secret = "3a1ae6617cb516a6aaff94f4d0af6b36edfb9f8c8f70ce27769d3fa2f0ce8fb9";
+  // NOT a real key — a fixed dummy hex string just to exercise round-tripping.
+  const secret = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
 
   it("round-trips a secret", () => {
     const enc = encryptSecret(secret, key);
