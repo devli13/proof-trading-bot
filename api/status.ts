@@ -46,6 +46,7 @@ export default async function handler(
       account,
     });
   } catch (err) {
-    res.status(500).json({ ok: false, error: (err as Error).message });
+    console.error("status error:", (err as Error).message); // server-side only
+    res.status(500).json({ ok: false, error: "internal error" });
   }
 }

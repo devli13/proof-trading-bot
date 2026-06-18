@@ -33,6 +33,18 @@ describe("checkAccount kill-switch", () => {
     expect(s.tripped).toBe(true);
   });
 
+  it("trips on a non-positive margin ratio with positions (zero buffer)", () => {
+    const s = newRiskState();
+    s.startingEquity = 10_000_000_000n;
+    const v = checkAccount(
+      acct({ positions: [{ market: 7 } as never], marginRatioBps: 0n }),
+      s,
+      cfg,
+    );
+    expect(v.ok).toBe(false);
+    expect(s.tripped).toBe(true);
+  });
+
   it("trips on session drawdown over the cap", () => {
     const s = newRiskState();
     s.startingEquity = 10_000_000_000n;

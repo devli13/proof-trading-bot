@@ -66,10 +66,6 @@ export class MarketMakerStrategy implements Strategy {
     return this.configuredMarket > 0 ? this.configuredMarket : legs.underlying;
   }
 
-  restingMarkets(legs: EventLegs): number[] {
-    return [this.market(legs)];
-  }
-
   async onTick(ctx: StrategyContext): Promise<void> {
     const market = this.market(ctx.legs);
     const meta = ctx.marketMeta(market);

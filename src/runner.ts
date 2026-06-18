@@ -113,9 +113,15 @@ export class BotEngine {
     this.cacheAt = now;
   }
 
-  /** Serialize submits so no two share a millisecond-timestamp nonce (code 21). */
-  private async enqueueSubmit<T>(fn: () => Promise<T>): Promise<T> {
-    const run = async (): Promise<T> => {
+  /**
+   * Serialize submits so no two share a millisecond-timestamp nonce (code 21).
+   * Each call waits for the prior submit to settle (the chain always settles,
+   * resolved), then advances `lastSubmitMs` strictly forward — also covering a
+   * backwards clock. The caller sees the real result/error via `result`; the
+   * chain swallows so one failure can't poison the queue.
+   */
+  private enqueueSubmit<T>(fn: () => Promise<T>): Promise<T> {
+    const result = this.submitChain.then(async (): Promise<T> => {
       let now = Date.now();
       if (now <= this.lastSubmitMs) {
         await sleep(this.lastSubmitMs - now + 1);
@@ -123,13 +129,12 @@ export class BotEngine {
       }
       this.lastSubmitMs = now;
       return fn();
-    };
-    const p = this.submitChain.then(run, run);
-    this.submitChain = p.then(
+    });
+    this.submitChain = result.then(
       () => undefined,
       () => undefined,
     );
-    return p as Promise<T>;
+    return result;
   }
 
   async tick(): Promise<TickSummary> {
@@ -156,9 +161,10 @@ export class BotEngine {
       });
       if (!this.config.dryRun) {
         try {
-          await this.enqueueSubmit(() => cancelAllOrders(this.client, this.wallet)); // account-wide
+          // account-wide cancel — retried, since a failed kill-switch cancel leaves live orders.
+          await retry(() => this.enqueueSubmit(() => cancelAllOrders(this.client, this.wallet)), 3, 300);
         } catch (err) {
-          this.logger.error({ err: (err as Error).message }, "kill-switch cancel failed");
+          this.logger.error({ err: (err as Error).message }, "kill-switch cancel FAILED after retries");
         }
       }
       return { halted: true, reason: verdict.reason, equity: verdict.equity.toString() };

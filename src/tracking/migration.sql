@@ -1,7 +1,12 @@
--- proof-trading-bot tracking schema (idempotent). Run via Supabase SQL editor,
--- psql, or it auto-runs on PostgresTracker.connect(). See src/tracking/postgres.ts.
+-- proof-trading-bot tracking schema (idempotent), isolated in a dedicated schema
+-- so it doesn't collide with other projects in the same database. Auto-runs on
+-- PostgresTracker.connect() (see src/tracking/postgres.ts migrationSql()); this
+-- copy is for manual runs via the Supabase SQL editor / psql. Replace `proof_bot`
+-- if you set a different DB_SCHEMA.
 
-create table if not exists bot_orders (
+create schema if not exists proof_bot;
+
+create table if not exists proof_bot.bot_orders (
   id bigserial primary key,
   client_order_id text not null,
   strategy text not null,
@@ -15,9 +20,9 @@ create table if not exists bot_orders (
   note text,
   ts timestamptz not null default now()
 );
-create index if not exists bot_orders_strategy_ts_idx on bot_orders (strategy, ts);
+create index if not exists bot_orders_strategy_ts_idx on proof_bot.bot_orders (strategy, ts);
 
-create table if not exists bot_snapshots (
+create table if not exists proof_bot.bot_snapshots (
   id bigserial primary key,
   balance text not null,
   equity text not null,
@@ -26,7 +31,7 @@ create table if not exists bot_snapshots (
   ts timestamptz not null default now()
 );
 
-create table if not exists bot_decisions (
+create table if not exists proof_bot.bot_decisions (
   id bigserial primary key,
   strategy text not null,
   action text not null,

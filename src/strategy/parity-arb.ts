@@ -34,10 +34,6 @@ function top(book: Orderbook): { bid?: bigint; ask?: bigint; mid?: bigint } {
 export class ParityArbStrategy implements Strategy {
   readonly name = "parity-arb";
 
-  restingMarkets(): number[] {
-    return [];
-  }
-
   async onTick(ctx: StrategyContext): Promise<void> {
     const legs = ctx.legs;
     if (nearResolution(legs, ctx.config.resolutionGuardMs, ctx.nowMs)) {
@@ -54,8 +50,10 @@ export class ParityArbStrategy implements Strategy {
     if (eby.bid === undefined || eby.ask === undefined || ebn.bid === undefined || ebn.ask === undefined) {
       ctx.recordDecision("skip", { reason: "empty binary book" });
     } else {
-      const takerBps = ctx.marketMeta(legs.eby)?.takerFeeBps ?? 5;
-      const reqBps = ctx.config.arbMinEdgeBps + ctx.config.arbVoidSafetyBps + 2 * takerBps;
+      const takerEby = ctx.marketMeta(legs.eby)?.takerFeeBps ?? 5;
+      const takerEbn = ctx.marketMeta(legs.ebn)?.takerFeeBps ?? 5;
+      const reqBps =
+        ctx.config.arbMinEdgeBps + ctx.config.arbVoidSafetyBps + takerEby + takerEbn;
       const edge = (ONE_DOLLAR * BigInt(reqBps)) / 10000n;
       const qty = ctx.config.arbOrderQty;
       const buyCost = eby.ask + ebn.ask; // pay asks to BUY both → payout $1

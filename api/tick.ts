@@ -16,8 +16,14 @@ export default async function handler(
   req: VercelRequest,
   res: VercelResponse,
 ): Promise<void> {
+  // Fail closed: this route places orders, so require CRON_SECRET to be set AND
+  // matched (Vercel cron sends it as a Bearer token). Unset ⇒ misconfigured ⇒ 503.
   const secret = process.env.CRON_SECRET;
-  if (secret && req.headers.authorization !== `Bearer ${secret}`) {
+  if (!secret) {
+    res.status(503).json({ ok: false, error: "service not configured" });
+    return;
+  }
+  if (req.headers.authorization !== `Bearer ${secret}`) {
     res.status(401).json({ ok: false, error: "unauthorized" });
     return;
   }
@@ -28,6 +34,7 @@ export default async function handler(
     const result = await executeTick(config, logger, buildStrategies(config));
     res.status(200).json({ ok: true, ...result });
   } catch (err) {
-    res.status(500).json({ ok: false, error: (err as Error).message });
+    console.error("tick error:", (err as Error).message); // log detail server-side only
+    res.status(500).json({ ok: false, error: "internal error" });
   }
 }

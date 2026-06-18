@@ -70,8 +70,6 @@ export interface StrategyContext {
 
 export interface Strategy {
   readonly name: string;
-  /** Markets this strategy rests orders on (for scoped cancels on shutdown). */
-  restingMarkets(legs: EventLegs, config: Config): number[];
   init?(ctx: StrategyContext): Promise<void>;
   onTick(ctx: StrategyContext): Promise<void>;
   shutdown?(ctx: StrategyContext): Promise<void>;

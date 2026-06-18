@@ -14,6 +14,7 @@
     "wallet:new": "tsx src/index.ts wallet new",
     "fund": "tsx src/index.ts fund",
     "smoke": "tsx src/index.ts smoke",
+    "tick": "tsx src/index.ts tick",
     "run": "tsx src/index.ts run",
     "start": "tsx src/index.ts run",
     "dev": "tsx watch src/index.ts run",

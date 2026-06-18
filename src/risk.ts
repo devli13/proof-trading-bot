@@ -68,11 +68,13 @@ export function checkAccount(
 
   // marginRatioBps is "equity / total notional * 10000" — higher is safer; it is
   // 0/undefined when there are no positions, so only enforce it once we have risk.
-  if (hasPositions && mr > 0n && mr < BigInt(config.minMarginRatioBps)) {
+  // With positions, a non-positive ratio means ~zero/negative margin buffer
+  // (liquidation risk) and must trip too.
+  if (hasPositions && (mr <= 0n || mr < BigInt(config.minMarginRatioBps))) {
     state.tripped = true;
     return {
       ok: false,
-      reason: `margin ratio ${mr}bps below floor ${config.minMarginRatioBps}bps`,
+      reason: `margin ratio ${mr}bps at/below floor ${config.minMarginRatioBps}bps`,
       marginRatioBps: mr,
       drawdownBps,
       equity: account.equity,

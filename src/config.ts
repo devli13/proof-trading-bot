@@ -72,6 +72,12 @@ const EnvSchema = z.object({
 
   // ── Tracking (Supabase/Postgres) ─────────────────────────────────────────
   DATABASE_URL: z.string().min(1).optional(),
+  /** Dedicated schema so this project's tables are isolated from others in the
+   *  same database. Validated as a bare identifier (used in DDL). */
+  DB_SCHEMA: z
+    .string()
+    .regex(/^[a-z_][a-z0-9_]*$/, "DB_SCHEMA must be a bare lowercase identifier")
+    .default("proof_bot"),
 
   // ── Safety ───────────────────────────────────────────────────────────────
   DRY_RUN: z.preprocess(boolish, z.boolean()).default(false),
@@ -113,6 +119,7 @@ export interface Config {
   tickIntervalMs: number;
 
   databaseUrl?: string;
+  dbSchema: string;
   dryRun: boolean;
   cronSecret?: string;
 }
@@ -179,6 +186,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     tickIntervalMs: e.TICK_INTERVAL_MS,
 
     databaseUrl: e.DATABASE_URL,
+    dbSchema: e.DB_SCHEMA,
     dryRun: e.DRY_RUN,
     cronSecret: e.CRON_SECRET,
   };

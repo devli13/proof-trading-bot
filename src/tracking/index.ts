@@ -23,7 +23,7 @@ export async function createTracker(
 ): Promise<Tracker> {
   if (config.databaseUrl) {
     try {
-      return await PostgresTracker.connect(config.databaseUrl, logger);
+      return await PostgresTracker.connect(config.databaseUrl, config.dbSchema, logger);
     } catch (err) {
       logger.warn(
         { err: (err as Error).message },
