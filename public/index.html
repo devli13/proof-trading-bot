@@ -755,8 +755,10 @@
         catch (e) { statusOk = false; lastLatency = null; }
         finally { recomputePill(); }
       }
-      async function loopStats() { if (document.hidden) return; try { progStart(); await pollStats(); } finally { progDone(); statsTimer = setTimeout(loopStats, 5000); } }
-      async function loopStatus() { if (document.hidden) return; try { await pollStatus(); } finally { statusTimer = setTimeout(loopStatus, 10000); } }
+      // Always fetch on call (so a background tab still loads initial data); only the
+      // RECURRING poll pauses when hidden, and resumes on visibilitychange.
+      async function loopStats() { try { progStart(); await pollStats(); } finally { progDone(); if (!document.hidden) statsTimer = setTimeout(loopStats, 5000); } }
+      async function loopStatus() { try { await pollStatus(); } finally { if (!document.hidden) statusTimer = setTimeout(loopStatus, 10000); } }
 
       // ── listeners ────────────────────────────────────────────────────────
       function wireListeners() {
