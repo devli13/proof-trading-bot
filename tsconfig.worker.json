@@ -17,6 +17,6 @@
     "noEmit": true,
     "paths": { "@/*": ["./*"] }
   },
-  "include": ["src", "api", "vitest.config.ts"],
+  "include": ["src", "vitest.config.ts"],
   "exclude": ["node_modules", "vendor", ".next", "app", "components"]
 }
