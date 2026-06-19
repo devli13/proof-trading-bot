@@ -160,7 +160,6 @@ select:hover { border-color: var(--border-strong); }
   font-size: var(--fz-0); margin-right: 3px; }
 .chip-strat { border: 1px solid rgba(122, 162, 255, .25); }
 .chip-action { background: var(--surface-2); color: var(--tx-3); }
-.rowspark { display: inline-block; vertical-align: middle; }
 
 .drawer-inner { min-width: 0; width: 100%; }
 .drawer-inner.show { padding: var(--s3) var(--s2); background: var(--surface-2); border-bottom: 1px solid var(--border-soft); }
@@ -305,6 +304,6 @@ details[open] summary .caret { transform: rotate(90deg); }
   .tablewrap { overflow-x: visible; }
 }
 @media(max-width:375px) {
-  .chart-head .chart-view-seg { flex: 1 1 100%; }
+  .chart-head .seg:first-of-type { flex: 1 1 100%; }
   .kpis { grid-template-columns: 1fr; }
 }

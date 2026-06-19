@@ -12,7 +12,6 @@ export interface BotLike {
   markets?: number[] | "all";
   lastTick?: string | null;
   series?: Array<{ ts: string; equity: number }>;
-  [k: string]: unknown;
 }
 
 export const esc = (s: unknown): string =>
@@ -87,7 +86,7 @@ export const botMatches = (b: BotLike, F: FilterState): boolean => {
 
 export function filteredSorted<T extends BotLike>(bots: T[], F: FilterState, sortKey: string, sortDir: number): T[] {
   const list = bots.filter((b) => botMatches(b, F));
-  const val = (b: T): number | string => (sortKey === "bot" ? b.bot : ((b[sortKey] as number | undefined) ?? -Infinity));
+  const val = (b: T): number | string => (sortKey === "bot" ? b.bot : (((b as Record<string, unknown>)[sortKey] as number | undefined) ?? -Infinity));
   list.sort((a, c) => {
     const x = val(a);
     const y = val(c);

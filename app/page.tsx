@@ -1,14 +1,7 @@
+import { Dashboard } from "@/components/dashboard";
+
+// Client hydrates immediately (skeleton → realtime). Kept a server component so the
+// shell streams instantly; the fleet data loads client-side via the realtime hook.
 export default function Page() {
-  return (
-    <div className="wrap">
-      <header className="topbar">
-        <div className="topbar-id">
-          <h1>
-            proof-trading-bot <span className="muted">· fleet</span>
-          </h1>
-          <p className="sub">Next.js scaffold — dashboard wiring in progress</p>
-        </div>
-      </header>
-    </div>
-  );
+  return <Dashboard initial={null} />;
 }
