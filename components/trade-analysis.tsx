@@ -5,6 +5,7 @@ import { fetchTradeAnalysis } from "@/lib/api";
 import type { TradeBucket } from "@/lib/types";
 import { usd } from "@/lib/dashboard-lib";
 import { enter } from "@/lib/motion";
+import { useDefaultOpen } from "@/lib/use-default-open";
 
 const fmtBps = (v: number | null): string => (v == null ? "—" : (v > 0 ? "+" : "") + v.toFixed(1) + " bps");
 const pct = (v: number | null): string => (v == null ? "—" : Math.round(v * 100) + "%");
@@ -19,6 +20,7 @@ const favTint = (v: number | null): string =>
  */
 export function TradeAnalysis() {
   const reduce = useReducedMotion() ?? false;
+  const [open, setOpen] = useDefaultOpen();
   const [buckets, setBuckets] = useState<TradeBucket[] | null>(null);
 
   useEffect(() => {
@@ -46,13 +48,21 @@ export function TradeAnalysis() {
     reduce ? { width: `${frac * 100}%` } : { initial: { width: 0 }, animate: { width: `${frac * 100}%` }, transition: { ...enter, delay: i * 0.04 } };
 
   return (
-    <section aria-label="Trade-size analysis">
-      <h2>
-        Trade-size analysis{" "}
-        <span className="muted" style={{ fontWeight: "var(--fw-reg)", fontSize: "var(--fz-1)" }}>
-          · does size pay, and how much do big trades move the book? · last 24h
+    <details
+      className="analysis"
+      aria-label="Trade-size analysis"
+      open={open}
+      onToggle={(e) => setOpen((e.currentTarget as HTMLDetailsElement).open)}
+    >
+      <summary>
+        <span className="caret" aria-hidden="true">
+          ›
         </span>
-      </h2>
+        <span className="sum-h2">Trade-size analysis</span>
+        <span className="muted" style={{ fontWeight: "var(--fw-reg)", fontSize: "var(--fz-1)" }}>
+          · does size pay? · last 24h
+        </span>
+      </summary>
 
       {buckets == null ? (
         <div className="skel skel-row" style={{ height: 120, marginTop: "var(--s3)" }} />
@@ -103,7 +113,7 @@ export function TradeAnalysis() {
           </div>
 
           {/* ── Per-bucket metrics ── */}
-          <div className="tablewrap" style={{ marginTop: "var(--s4)" }}>
+          <div className="tablewrap trade-table-wrap" style={{ marginTop: "var(--s4)" }}>
             <table className="mini" style={{ width: "100%" }}>
               <thead>
                 <tr>
@@ -121,13 +131,13 @@ export function TradeAnalysis() {
                     <td className="l" style={{ fontWeight: "var(--fw-semi)", color: "var(--tx)" }}>
                       {b.label}
                     </td>
-                    <td>{b.trades.toLocaleString()}</td>
-                    <td>{usd(b.avgNotional)}</td>
-                    <td>
+                    <td data-k="Trades">{b.trades.toLocaleString()}</td>
+                    <td data-k="Avg">{usd(b.avgNotional)}</td>
+                    <td data-k="Win rate">
                       <Bar frac={b.winRate ?? 0} color="var(--accent)" label={pct(b.winRate)} anim={animBar(b.winRate ?? 0, i)} />
                     </td>
-                    <td style={{ color: favTint(b.avgFavBps), fontWeight: "var(--fw-med)" }}>{fmtBps(b.avgFavBps)}</td>
-                    <td>
+                    <td data-k="Favorable" style={{ color: favTint(b.avgFavBps), fontWeight: "var(--fw-med)" }}>{fmtBps(b.avgFavBps)}</td>
+                    <td data-k="Impact">
                       <Bar
                         frac={(b.avgImpactBps ?? 0) / maxImpact}
                         color="var(--accent-2)"
@@ -149,7 +159,7 @@ export function TradeAnalysis() {
           </p>
         </>
       )}
-    </section>
+    </details>
   );
 }
 

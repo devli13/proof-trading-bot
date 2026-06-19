@@ -275,6 +275,7 @@ export function BotDrawer({ bot, color, now, strategyLogic, range }: BotDrawerPr
 
         <div className="dr-h">Metrics</div>
         <div
+          className="dr-metrics"
           style={{
             display: "grid",
             gridTemplateColumns: "repeat(auto-fill, minmax(108px, 1fr))",
@@ -300,8 +301,14 @@ export function BotDrawer({ bot, color, now, strategyLogic, range }: BotDrawerPr
             marginBottom: "var(--s1)",
           }}
         >
-          <WinRateRadial value={m.winRate} />
-          <div style={{ flex: "1 1 160px", minWidth: 0 }}>
+          <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 2 }} title="Win rate — share of ticks where equity rose">
+            <WinRateRadial value={m.winRate} />
+            <span style={{ fontSize: "var(--fz-0)", color: "var(--tx-4)", textTransform: "uppercase", letterSpacing: ".04em" }}>win rate</span>
+          </div>
+          <div className="dr-exec" style={{ flex: "1 1 160px", minWidth: 0 }}>
+            <div style={{ fontSize: "var(--fz-0)", color: "var(--tx-4)", textTransform: "uppercase", letterSpacing: ".04em", marginBottom: 2 }}>
+              execution
+            </div>
             <ExecQualityBar makerPct={m.makerPct} rejectRate={m.rejectRate} inferred />
           </div>
         </div>

@@ -6,6 +6,7 @@ import type { InsightsProps } from "./contracts";
 import type { BotStat } from "@/lib/types";
 import { dim, pnlStr, sign } from "@/lib/dashboard-lib";
 import { layoutSpring, enter } from "@/lib/motion";
+import { useDefaultOpen } from "@/lib/use-default-open";
 
 // The design tokens (--money-pos/--money-neg) resolved to their literal hex so dim()
 // (which expects "#rrggbb") can append an alpha channel for the low-opacity tile tints.
@@ -21,6 +22,7 @@ const NEG_HEX = "#ff6b6b";
  */
 export function Insights({ bots, colors }: InsightsProps) {
   const reduce = useReducedMotion() ?? false;
+  const [open, setOpen] = useDefaultOpen();
 
   // Treemap tiles: flex-grow weight ∝ sqrt(volume) so area (not edge) tracks volume.
   // A floor of 1 keeps zero-volume bots visible as the smallest legible tile.
@@ -66,11 +68,24 @@ export function Insights({ bots, colors }: InsightsProps) {
   };
 
   return (
-    <section aria-label="Insights">
-      <h2>Insights</h2>
+    <details
+      className="insights"
+      aria-label="Insights"
+      open={open}
+      onToggle={(e) => setOpen((e.currentTarget as HTMLDetailsElement).open)}
+    >
+      <summary>
+        <span className="caret" aria-hidden="true">
+          ›
+        </span>
+        <span className="sum-h2">Insights</span>
+        <span className="muted" style={{ fontSize: "var(--fz-1)" }}>
+          · volume map + flow
+        </span>
+      </summary>
 
       <div
-        style={{ display: "flex", flexDirection: "column", gap: "var(--s4)", marginTop: "var(--s3)" }}
+        style={{ display: "flex", flexDirection: "column", gap: "var(--s4)", marginTop: "var(--s3)", paddingBottom: "var(--s4)" }}
       >
         {/* (1) Fleet treemap — tile area ∝ sqrt(volume), tinted by pnl sign. */}
         <motion.div
@@ -80,6 +95,7 @@ export function Insights({ bots, colors }: InsightsProps) {
         >
           <div style={{ ...labelStyle, marginBottom: "var(--s2)" }}>Fleet by volume</div>
           <div
+            className="fleet-treemap"
             role="img"
             aria-label="Fleet treemap: tile size reflects trading volume, color reflects PnL"
             style={{
@@ -196,6 +212,7 @@ export function Insights({ bots, colors }: InsightsProps) {
           </div>
 
           <div
+            className="flow-bar"
             role="img"
             aria-label={`Net flow: ${pnlStr(flow.buy)} buy pressure, ${pnlStr(-flow.sell)} sell pressure`}
             style={{
@@ -248,6 +265,6 @@ export function Insights({ bots, colors }: InsightsProps) {
           </div>
         </motion.div>
       </div>
-    </section>
+    </details>
   );
 }

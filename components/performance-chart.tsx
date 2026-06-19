@@ -59,6 +59,14 @@ function HistoryChart({
   mode,
   iso,
 }: Pick<PerformanceChartProps, "bots" | "filter" | "colors" | "mode" | "iso">) {
+  // Coarse pointer (touch): use a single-line "nearest" tooltip that doesn't blanket the
+  // chart and dismisses when you tap empty space. The desktop index-mode tooltip lists all
+  // ~10 bots → a huge box that covers the graph and won't clear on a phone.
+  const [coarse, setCoarse] = useState(false);
+  useEffect(() => {
+    setCoarse(typeof window !== "undefined" && !!window.matchMedia?.("(pointer:coarse)").matches);
+  }, []);
+
   // Dashed zero baseline, only in pnl mode (equity has no meaningful zero here).
   const zeroLinePlugin = useMemo<Plugin<"line">>(
     () => ({
@@ -109,7 +117,9 @@ function HistoryChart({
       responsive: true,
       maintainAspectRatio: false,
       animation: false,
-      interaction: { mode: "index", intersect: false, axis: "x" },
+      interaction: coarse
+        ? { mode: "nearest", intersect: true }
+        : { mode: "index", intersect: false, axis: "x" },
       plugins: {
         legend: { display: false },
         tooltip: {
@@ -178,7 +188,7 @@ function HistoryChart({
         },
       },
     }),
-    [mode, iso],
+    [mode, iso, coarse],
   );
 
   return (
@@ -394,6 +404,17 @@ export function PerformanceChart({
       </div>
 
       <div id="chart-legend" className={"legend" + (iso !== null ? " has-iso" : "")}>
+        {iso !== null && (
+          <button
+            type="button"
+            className="leg leg-reset"
+            onClick={() => onIso(null)}
+            style={{ color: "var(--accent)", fontWeight: "var(--fw-semi)" }}
+            title="Show all bots"
+          >
+            ↺ show all
+          </button>
+        )}
         {legend.map((b) => {
           const c = colors[b.bot] ?? "#7aa2ff";
           const pressed = iso === b.bot;
