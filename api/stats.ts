@@ -9,6 +9,7 @@ import {
   type SnapshotRow,
   type VolRow,
   type SeriesRow,
+  type MetricsRow,
 } from "../src/stats-core.js";
 
 /**
@@ -39,6 +40,20 @@ export default async function handler(
     });
     const t = (name: string) => sql`${sql(schema)}.${sql(name)}`;
 
+    // Global strategy-change log (?changes=1) — fleet-wide audit timeline.
+    if (req.query.changes === "1") {
+      let changes: unknown = [];
+      try {
+        changes = await sql`select bot, kind, before, after, note, ts from ${t("bot_changes")}
+          order by ts desc limit 200`;
+      } catch {
+        changes = [];
+      }
+      await sql.end({ timeout: 3 });
+      res.status(200).json({ ok: true, changes });
+      return;
+    }
+
     // Per-bot deep history (?bot=<id>) — the drill-down drawer asks for ONE bot's
     // full 24h orders + decision breakdown, beyond the global 60/200 firehose caps.
     // Additive + read-only; never selects the key column.
@@ -54,8 +69,16 @@ export default async function handler(
             where bot = ${botParam} and ts > now() - interval '24 hours'
             group by strategy, action order by c desc`,
       ]);
+      // Strategy-change timeline for this bot (tolerate the table not existing yet).
+      let changes: unknown = [];
+      try {
+        changes = await sql`select kind, before, after, note, ts from ${t("bot_changes")}
+          where bot = ${botParam} order by ts desc limit 100`;
+      } catch {
+        changes = [];
+      }
       await sql.end({ timeout: 3 });
-      res.status(200).json({ ok: true, bot: botParam, recentOrders: orders, decisions: decs });
+      res.status(200).json({ ok: true, bot: botParam, recentOrders: orders, decisions: decs, changes });
       return;
     }
 
@@ -90,6 +113,21 @@ export default async function handler(
       where equity::numeric > 0 ${sinceClause}
       group by bot, m order by m asc`;
 
+    // Per-bot order-aggregate metrics over the SAME window: avg trade size, last-hour
+    // count, activity span, maker% (inferred: market-maker orders are the post-only path),
+    // reject rate (check_tx_code<>0), and signed net buy/sell flow. Feeds BotStat.metrics.
+    const metricsRows = await sql`select bot,
+        coalesce(avg((price::numeric) * (quantity::numeric) / 100), 0) as avg_trade_micro,
+        count(*) filter (where ts > now() - interval '1 hour') as last_hour_trades,
+        extract(epoch from (max(ts) - min(ts))) / 3600 as span_hours,
+        count(*)::int as trades_window,
+        avg((kind = 'order' and strategy = 'market-maker')::int) as maker_pct,
+        avg((check_tx_code is not null and check_tx_code <> 0)::int) as reject_rate,
+        coalesce(sum(case when side = 'Buy' then 1 else -1 end * (price::numeric) * (quantity::numeric) / 100), 0) as net_flow_micro
+      from ${t("bot_orders")}
+      where (note is null or note <> 'dry-run') and strategy <> 'audit-prep' ${sinceClause}
+      group by bot`;
+
     // Earliest snapshot overall — lets the client hide timeframe options that would
     // just duplicate "all" (e.g. hide 7d/30d when there's <7d/<30d of history).
     const sinceRow = await sql`select min(ts) as since from ${t("bot_snapshots")}`;
@@ -109,6 +147,7 @@ export default async function handler(
       latest as unknown as SnapshotRow[],
       vol as unknown as VolRow[],
       series as unknown as SeriesRow[],
+      metricsRows as unknown as MetricsRow[],
     );
 
     res.status(200).json({
@@ -121,6 +160,7 @@ export default async function handler(
       decisions,
       recentOrders: recent,
       strategyLogic: STRATEGY_LOGIC,
+      makerInferred: true, // maker/taker is inferred from strategy (not yet persisted per-order)
     });
   } catch (err) {
     console.error("stats error:", (err as Error).message);

@@ -6,8 +6,8 @@ import { migrationSql } from "./postgres.js";
 const sql = migrationSql("proof_bot");
 
 describe("migrationSql — schema", () => {
-  it("creates all four tables (schema-qualified)", () => {
-    for (const tbl of ["bot_orders", "bot_snapshots", "bot_decisions", "bots"]) {
+  it("creates all tables (schema-qualified)", () => {
+    for (const tbl of ["bot_orders", "bot_snapshots", "bot_decisions", "bots", "bot_changes"]) {
       expect(sql).toContain(`create table if not exists proof_bot.${tbl}`);
     }
   });
@@ -18,29 +18,29 @@ describe("migrationSql — schema", () => {
 
 describe("migrationSql — RLS security invariants", () => {
   it("enables RLS on every table", () => {
-    for (const tbl of ["bot_snapshots", "bot_orders", "bot_decisions", "bots"]) {
+    for (const tbl of ["bot_snapshots", "bot_orders", "bot_decisions", "bots", "bot_changes"]) {
       expect(sql).toContain(`alter table %I.${tbl} enable row level security`);
     }
   });
-  it("grants anon SELECT on the 3 non-sensitive tables only", () => {
-    expect(sql).toContain("grant select on %I.bot_snapshots to anon");
-    expect(sql).toContain("grant select on %I.bot_orders to anon");
-    expect(sql).toContain("grant select on %I.bot_decisions to anon");
+  it("grants anon SELECT on the non-sensitive tables only", () => {
+    for (const tbl of ["bot_snapshots", "bot_orders", "bot_decisions", "bot_changes"]) {
+      expect(sql).toContain(`grant select on %I.${tbl} to anon`);
+    }
   });
   it("NEVER grants anon access to the keys table — and revokes it", () => {
     expect(sql).not.toContain("grant select on %I.bots to anon");
     expect(sql).toContain("revoke all on %I.bots from anon");
   });
-  it("anon read policies exist on the 3 data tables", () => {
-    for (const tbl of ["bot_snapshots", "bot_orders", "bot_decisions"]) {
+  it("anon read policies exist on the non-sensitive tables", () => {
+    for (const tbl of ["bot_snapshots", "bot_orders", "bot_decisions", "bot_changes"]) {
       expect(sql).toContain(`create policy anon_read on %I.${tbl} for select to anon using (true)`);
     }
   });
 });
 
 describe("migrationSql — realtime invariants", () => {
-  it("adds the 3 data tables to the realtime publication", () => {
-    for (const tbl of ["bot_snapshots", "bot_orders", "bot_decisions"]) {
+  it("adds the non-sensitive data tables to the realtime publication", () => {
+    for (const tbl of ["bot_snapshots", "bot_orders", "bot_decisions", "bot_changes"]) {
       expect(sql).toContain(`add table %I.${tbl}`);
     }
   });

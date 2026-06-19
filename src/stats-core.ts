@@ -3,6 +3,9 @@
  * api/stats.ts so it is unit-testable. Takes raw DB rows and produces the per-bot
  * breakdown + aggregate the dashboard consumes. NEVER touches private keys.
  */
+import { buildMetrics, type MetricsRow, type BotMetrics } from "./stats-metrics.js";
+
+export type { MetricsRow, BotMetrics } from "./stats-metrics.js";
 
 /** Chart timeframe windows for the equity series (?range=). */
 export const RANGES: Record<string, { interval: string | null; bucket: string }> = {
@@ -88,10 +91,13 @@ export interface BotStat {
   lastTick: string | null;
   lastTrade: string | null;
   series: Array<{ ts: string; equity: number }>;
+  metrics: BotMetrics;
 }
 
-/** Build the per-bot breakdown from the raw query rows. Pure. */
-export function computeBots(registry: RegistryRow[], latest: SnapshotRow[], vol: VolRow[], series: SeriesRow[]): BotStat[] {
+/** Build the per-bot breakdown from the raw query rows. Pure. `metricsRows` is the
+ *  per-bot order-aggregate (avg trade size, throughput, maker/taker, reject, net flow);
+ *  optional + defaulted so existing 4-arg callers keep working. */
+export function computeBots(registry: RegistryRow[], latest: SnapshotRow[], vol: VolRow[], series: SeriesRow[], metricsRows: MetricsRow[] = []): BotStat[] {
   const seriesByBot = new Map<string, Array<{ ts: string; equity: number }>>();
   for (const r of series) {
     if (!seriesByBot.has(r.bot)) seriesByBot.set(r.bot, []);
@@ -99,6 +105,7 @@ export function computeBots(registry: RegistryRow[], latest: SnapshotRow[], vol:
   }
   const latestByBot = new Map(latest.map((r) => [r.bot, r]));
   const volByBot = new Map(vol.map((r) => [r.bot, r]));
+  const metricsByBot = new Map(metricsRows.map((r) => [r.bot, r]));
   const regById = new Map(registry.map((r) => [r.id, r]));
   const botIds = new Set<string>([...registry.map((r) => r.id), ...latest.map((r) => r.bot), ...vol.map((r) => r.bot)]);
 
@@ -111,21 +118,24 @@ export function computeBots(registry: RegistryRow[], latest: SnapshotRow[], vol:
     // is the right PnL baseline (works for any starting balance).
     const startEq = s[0]?.equity ?? null;
     const curEq = snap ? num(snap.equity) : (s.at(-1)?.equity ?? null);
+    const pnl = startEq != null && curEq != null ? curEq - startEq : null;
+    const positions = snap ? parsePositions(snap.positions) : [];
     return {
       bot: id,
       strategies: reg?.strategies ?? [],
       tags: reg?.tags ?? [],
       markets: parseMarkets(reg?.markets),
       enabled: reg ? (reg.enabled ?? null) : null,
-      pnl: startEq != null && curEq != null ? curEq - startEq : null,
+      pnl,
       equity: curEq,
       balance: snap ? num(snap.balance) : null,
       volume: v ? num(v.volume_micro) : 0,
       trades: v ? num(v.trades) : 0,
-      positions: snap ? parsePositions(snap.positions) : [],
+      positions,
       lastTick: snap ? snap.ts : null,
       lastTrade: v?.last_trade ?? null,
       series: s,
+      metrics: buildMetrics(metricsByBot.get(id), s, pnl, positions),
     };
   });
 }

@@ -65,6 +65,21 @@ create table if not exists ${schema}.bots (
   created_at timestamptz not null default now()
 );
 
+-- Strategy-change audit log: one row per change to a bot's params/strategies/markets/
+-- tags/enabled (NEVER the key). Non-sensitive config history → anon may READ it (like
+-- the 3 data tables) so the dashboard can annotate PnL with "what changed, when".
+create table if not exists ${schema}.bot_changes (
+  id bigserial primary key,
+  bot text not null,
+  kind text not null,
+  before jsonb,
+  after jsonb,
+  note text,
+  ts timestamptz not null default now()
+);
+create index if not exists bot_changes_bot_ts_idx on ${schema}.bot_changes (bot, ts);
+create index if not exists bot_changes_ts_idx on ${schema}.bot_changes (ts);
+
 -- ── Realtime streaming + RLS (Supabase). anon may READ the 3 non-sensitive tables
 -- (for the public dashboard); the bots table (private_key_enc) is NEVER granted to
 -- anon. A trigger broadcasts a lightweight signal on each new snapshot so the
@@ -82,6 +97,8 @@ begin
     execute format('grant select on %I.bot_snapshots to anon', s);
     execute format('grant select on %I.bot_orders to anon', s);
     execute format('grant select on %I.bot_decisions to anon', s);
+    execute format('alter table %I.bot_changes enable row level security', s);
+    execute format('grant select on %I.bot_changes to anon', s);
     execute format('revoke all on %I.bots from anon', s); -- keys: anon gets nothing
     execute format('drop policy if exists anon_read on %I.bot_snapshots', s);
     execute format('create policy anon_read on %I.bot_snapshots for select to anon using (true)', s);
@@ -89,6 +106,8 @@ begin
     execute format('create policy anon_read on %I.bot_orders for select to anon using (true)', s);
     execute format('drop policy if exists anon_read on %I.bot_decisions', s);
     execute format('create policy anon_read on %I.bot_decisions for select to anon using (true)', s);
+    execute format('drop policy if exists anon_read on %I.bot_changes', s);
+    execute format('create policy anon_read on %I.bot_changes for select to anon using (true)', s);
   end if;
   if exists (select 1 from pg_publication where pubname = 'supabase_realtime') then
     if not exists (select 1 from pg_publication_tables where pubname='supabase_realtime' and schemaname=s and tablename='bot_snapshots') then
@@ -97,6 +116,8 @@ begin
       execute format('alter publication supabase_realtime add table %I.bot_orders', s); end if;
     if not exists (select 1 from pg_publication_tables where pubname='supabase_realtime' and schemaname=s and tablename='bot_decisions') then
       execute format('alter publication supabase_realtime add table %I.bot_decisions', s); end if;
+    if not exists (select 1 from pg_publication_tables where pubname='supabase_realtime' and schemaname=s and tablename='bot_changes') then
+      execute format('alter publication supabase_realtime add table %I.bot_changes', s); end if;
   end if;
 end $$;
 
