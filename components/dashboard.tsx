@@ -8,7 +8,7 @@ import { assignColors } from "@/lib/colors";
 const PILL_LABEL = { green: "live", yellow: "degraded", red: "down" } as const;
 import type { StatsResponse, FilterState, ChartMode, ChartView } from "@/lib/types";
 import { Topbar } from "./topbar";
-import { KpiCards } from "./kpi-cards";
+import { FleetHero } from "./fleet-hero";
 import { PerformanceChart } from "./performance-chart";
 import { Insights } from "./insights";
 import { TradeAnalysis } from "./trade-analysis";
@@ -104,7 +104,12 @@ export function Dashboard({ initial }: { initial: StatsResponse | null }) {
       <a href="#bots-hub" className="sr-only skip">Skip to fleet</a>
       <div className="sr-only" aria-live="polite" aria-atomic="true">{liveMsg}</div>
       <Topbar fleet={fleet} onOpenJson={() => setJsonOpen(true)} />
-      <KpiCards aggregate={data?.aggregate ?? null} range={fleet.range} loading={!data} />
+      <FleetHero
+        aggregate={data?.aggregate ?? null}
+        fleetSeries={data?.fleetSeries ?? []}
+        range={fleet.range}
+        loading={!data}
+      />
       <PerformanceChart
         bots={bots}
         filter={filter}

@@ -14,6 +14,7 @@ export function Sparkline({ series, color, width = 72, height = 18, mode = "pnl"
         width={width}
         height={height}
         viewBox={`0 0 ${width} ${height}`}
+        preserveAspectRatio="none"
         aria-hidden="true"
         style={{ display: "block", overflow: "visible" }}
       />

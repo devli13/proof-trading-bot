@@ -42,12 +42,19 @@ export interface Aggregate {
   trades: number;
 }
 
+export interface FleetPoint {
+  ts: string;
+  equity: number | null; // micro-USDC, summed across bots
+  volume: number; // micro-USDC traded in the bucket
+}
+
 export interface StatsResponse {
   ok: true;
   asOf: string | null;
   range: string;
   dataSince: string | null;
   aggregate: Aggregate;
+  fleetSeries?: FleetPoint[];
   bots: BotStat[];
   decisions: DecisionAgg[];
   recentOrders: OrderRow[];

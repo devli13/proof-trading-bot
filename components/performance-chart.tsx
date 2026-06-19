@@ -316,6 +316,7 @@ export function PerformanceChart({
 }: PerformanceChartProps) {
   const reduced = useReducedMotion() ?? false;
   const [mounted, setMounted] = useState(false);
+  const [legendAll, setLegendAll] = useState(false);
   useEffect(() => setMounted(true), []);
 
   // Which range buttons to offer — gate 7d/30d on having that much history.
@@ -331,6 +332,13 @@ export function PerformanceChart({
         .sort((a, c) => (c.pnl ?? 0) - (a.pnl ?? 0)),
     [bots, filter],
   );
+
+  // Cap the legend so it doesn't dwarf the chart (esp. on mobile, where 10 bots stacked
+  // ~10 rows tall). Show the top few by PnL + a "+N more" expander; collapsing onto one
+  // line keeps the chart the focus. Sorted desc, so the cap keeps the biggest movers.
+  const LEG_CAP = 6;
+  const shownLegend = legendAll ? legend : legend.slice(0, LEG_CAP);
+  const moreCount = legend.length - shownLegend.length;
 
   // SR summary: best/worst of the shown set.
   const summary = useMemo(() => {
@@ -415,7 +423,7 @@ export function PerformanceChart({
             ↺ show all
           </button>
         )}
-        {legend.map((b) => {
+        {shownLegend.map((b) => {
           const c = colors[b.bot] ?? "#7aa2ff";
           const pressed = iso === b.bot;
           return (
@@ -435,6 +443,16 @@ export function PerformanceChart({
             </motion.button>
           );
         })}
+        {(moreCount > 0 || legendAll) && legend.length > LEG_CAP && (
+          <button
+            type="button"
+            className="leg leg-more"
+            onClick={() => setLegendAll((a) => !a)}
+            aria-expanded={legendAll}
+          >
+            {legendAll ? "show less" : `+${moreCount} more`}
+          </button>
+        )}
       </div>
 
       <div id="chart-summary" className="sr-only">

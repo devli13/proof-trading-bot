@@ -1,5 +1,5 @@
 "use client";
-import { Fragment } from "react";
+import { Fragment, useEffect, useRef, useState } from "react";
 import { motion, useReducedMotion } from "framer-motion";
 import type { TopbarProps } from "./contracts";
 import { relTime, absTime } from "@/lib/dashboard-lib";
@@ -9,6 +9,18 @@ const PILL_LABEL = { green: "live", yellow: "degraded", red: "down" } as const;
 
 export function Topbar({ fleet, onOpenJson }: TopbarProps) {
   const reduce = useReducedMotion() ?? false;
+  // Tap-toggle the status tooltip (desktop still gets hover via CSS). On touch there's no
+  // hover to end, so without an explicit toggle + tap-outside it could never be dismissed.
+  const [tipOpen, setTipOpen] = useState(false);
+  const pillWrap = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!tipOpen) return;
+    const onDown = (e: PointerEvent) => {
+      if (pillWrap.current && !pillWrap.current.contains(e.target as Node)) setTipOpen(false);
+    };
+    document.addEventListener("pointerdown", onDown);
+    return () => document.removeEventListener("pointerdown", onDown);
+  }, [tipOpen]);
   const { data, status, pill } = fleet;
   const asOf = data?.asOf ?? null;
   const bots = data?.bots ?? [];
@@ -49,26 +61,30 @@ export function Topbar({ fleet, onOpenJson }: TopbarProps) {
       </div>
 
       <div className="topbar-actions">
-        <motion.button
-          type="button"
-          className="pill"
-          data-level={pill}
-          aria-describedby="pill-tip"
-          aria-label={`Status: ${label}`}
-          whileHover={reduce ? undefined : pressable.whileHover}
-          whileTap={reduce ? undefined : pressable.whileTap}
-          transition={fast}
-        >
-          <span className="pill-dot" aria-hidden="true" />
-          <span className="pill-label">{label}</span>
-        </motion.button>
-        <div id="pill-tip" className="pill-tip" role="tooltip">
-          {tipRows.map(([k, v]) => (
-            <Fragment key={k}>
-              <dt>{k}</dt>
-              <dd>{v}</dd>
-            </Fragment>
-          ))}
+        <div className="pill-wrap" ref={pillWrap}>
+          <motion.button
+            type="button"
+            className="pill"
+            data-level={pill}
+            aria-describedby="pill-tip"
+            aria-label={`Status: ${label}`}
+            aria-expanded={tipOpen}
+            onClick={() => setTipOpen((o) => !o)}
+            whileHover={reduce ? undefined : pressable.whileHover}
+            whileTap={reduce ? undefined : pressable.whileTap}
+            transition={fast}
+          >
+            <span className="pill-dot" aria-hidden="true" />
+            <span className="pill-label">{label}</span>
+          </motion.button>
+          <div id="pill-tip" className={"pill-tip" + (tipOpen ? " open" : "")} role="tooltip">
+            {tipRows.map(([k, v]) => (
+              <Fragment key={k}>
+                <dt>{k}</dt>
+                <dd>{v}</dd>
+              </Fragment>
+            ))}
+          </div>
         </div>
 
         <motion.button

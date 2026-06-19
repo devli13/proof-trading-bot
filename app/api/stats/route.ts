@@ -93,6 +93,13 @@ export async function GET(req: Request): Promise<Response> {
       where equity::numeric > 0 ${sinceClause}
       group by bot, m order by m asc`;
 
+    // Fleet trading volume per bucket (micro-USDC) — for the top-strip volume sparkline.
+    const fleetVol = await sql`select date_trunc(${bucket}, ts) as m,
+        coalesce(sum((price::numeric) * (quantity::numeric) / 100), 0) as vol
+      from ${t("bot_orders")}
+      where (note is null or note <> 'dry-run') and strategy <> 'audit-prep' ${sinceClause}
+      group by m order by m asc`;
+
     const metricsRows = await sql`select bot,
         coalesce(avg((price::numeric) * (quantity::numeric) / 100), 0) as avg_trade_micro,
         count(*) filter (where ts > now() - interval '1 hour') as last_hour_trades,
@@ -123,12 +130,29 @@ export async function GET(req: Request): Promise<Response> {
       metricsRows as unknown as MetricsRow[],
     );
 
+    // Fleet aggregate series for the top strip: per bucket, sum each bot's latest equity
+    // (→ fleet equity + a fleet-PnL trend = equity − window-start equity) and the bucket's
+    // trading volume. All in micro-USDC; the client divides by 1e6 for labels.
+    const eqByM = new Map<number, number>();
+    for (const r of series as unknown as { m: string; equity: string }[]) {
+      const k = new Date(r.m).getTime();
+      eqByM.set(k, (eqByM.get(k) ?? 0) + Number(r.equity));
+    }
+    const volByM = new Map<number, number>();
+    for (const r of fleetVol as unknown as { m: string; vol: string }[]) {
+      volByM.set(new Date(r.m).getTime(), Number(r.vol));
+    }
+    const fleetSeries = [...new Set([...eqByM.keys(), ...volByM.keys()])]
+      .sort((a, b) => a - b)
+      .map((k) => ({ ts: new Date(k).toISOString(), equity: eqByM.get(k) ?? null, volume: volByM.get(k) ?? 0 }));
+
     return Response.json({
       ok: true,
       asOf: pickAsOf(latest as unknown as SnapshotRow[]),
       range: rangeKey,
       dataSince: sinceRow[0]?.since ?? null,
       aggregate: computeAggregate(bots),
+      fleetSeries,
       bots,
       decisions,
       recentOrders: recent,
