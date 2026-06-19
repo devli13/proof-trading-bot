@@ -648,10 +648,12 @@
         chartView = v;
         const hist = v === "history";
         document.querySelectorAll("#chart-view button").forEach((x) => x.setAttribute("aria-selected", String(x.dataset.view === v)));
-        document.getElementById("chart").hidden = !hist;
-        document.getElementById("livechart").hidden = hist;
+        // style.display (not the hidden attr) — Chart.js sets an inline display that
+        // beats [hidden], so the history canvas wouldn't actually hide otherwise.
+        document.getElementById("chart").style.display = hist ? "block" : "none";
+        document.getElementById("livechart").style.display = hist ? "none" : "block";
         document.getElementById("chart-range").style.display = hist ? "" : "none";
-        if (hist) { if (live) live.stop(); updateChart(); }
+        if (hist) { if (live) live.stop(); if (chart) chart.resize(); updateChart(); }
         else { document.getElementById("chart-empty").hidden = true; ensureLive(); live.setMode(chartMode); seedLive(); feedLive(); live.start(); renderLegend(); applyIsolation(); }
       }
 
