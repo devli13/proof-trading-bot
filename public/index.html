@@ -590,7 +590,7 @@
               legend: { display: false },
               tooltip: { backgroundColor: "#11141c", borderColor: "#1e2230", borderWidth: 1, titleColor: "#c7ccda", bodyColor: "#e6e8ee", padding: 8, cornerRadius: 8, boxWidth: 8, boxHeight: 8, itemSort: (a, b) => b.parsed.y - a.parsed.y, filter: (it) => !isoBot || it.dataset.botId === isoBot, callbacks: { title: (i) => new Date(i[0].parsed.x).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }), label: (it) => { const v = it.parsed.y; return " " + it.dataset.botId + "  " + (chartMode === "pnl" ? (v >= 0 ? "+" : "") + "$" + v.toFixed(2) : "$" + v.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })); }, labelColor: (it) => ({ borderColor: it.dataset.borderColor, backgroundColor: it.dataset.borderColor }) } } },
             scales: {
-              x: { type: "linear", grid: { color: "#181c27" }, ticks: { color: "#8b93a7", maxTicksLimit: 6, maxRotation: 0, autoSkip: true, callback: (v) => new Date(v).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) } },
+              x: { type: "linear", bounds: "data", offset: false, grid: { color: "#181c27" }, ticks: { color: "#8b93a7", maxTicksLimit: 6, maxRotation: 0, autoSkip: true, callback: (v) => new Date(v).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) } },
               y: { beginAtZero: false, grid: { color: "#181c27" }, ticks: { color: "#8b93a7", callback: (v) => (chartMode === "pnl" ? (v > 0 ? "+" : "") + "$" + v.toLocaleString(undefined, { maximumFractionDigits: 2 }) : "$" + v.toLocaleString()) } },
             },
           },
