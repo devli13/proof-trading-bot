@@ -86,6 +86,16 @@ section > h2::before, .chart-head h2::before, details > summary > .sum-h2::befor
 .ratio-bar { width: 100%; height: 6px; margin-top: var(--s2); background: var(--surface-2); border-radius: 3px; overflow: hidden; }
 .ratio-fill { height: 100%; background: var(--live); border-radius: 3px; transform-origin: left center; }
 
+/* ── Page-global window control + range-change loading states ── */
+.window-ctl { display: inline-flex; align-items: center; gap: var(--s2); }
+.win-spin { width: 12px; height: 12px; border: 2px solid var(--border-strong); border-top-color: var(--accent);
+  border-radius: 50%; animation: winspin .7s linear infinite; flex: 0 0 auto; }
+.loading-bar { position: fixed; top: 0; left: 0; right: 0; height: 2px; z-index: 60; overflow: hidden; pointer-events: none; }
+.loading-bar-fill { position: absolute; top: 0; height: 100%; width: 35%; border-radius: 0 2px 2px 0;
+  background: linear-gradient(90deg, transparent, var(--accent), var(--accent-2), transparent); animation: loadslide 1.05s var(--ease) infinite; }
+.kpis, .chart-sec { transition: opacity var(--t-base) var(--ease); }
+.is-updating .kpis, .is-updating .chart-sec { opacity: .5; }
+
 .chart-sec .chart-head { display: flex; align-items: center; gap: var(--s3); flex-wrap: wrap; margin-bottom: var(--s3); }
 .chart-head .spacer { flex: 1; }
 .chartbox { height: clamp(220px, 40vw, 300px); position: relative; }
@@ -235,6 +245,8 @@ details[open] summary .caret { transform: rotate(90deg); }
 @keyframes pulse { 0% { box-shadow: 0 0 0 0 rgba(61, 220, 132, .45); } 70% { box-shadow: 0 0 0 6px rgba(61, 220, 132, 0); } 100% { box-shadow: 0 0 0 0 rgba(61, 220, 132, 0); } }
 @keyframes shimmer { 100% { transform: translateX(100%); } }
 @keyframes rowpulse { 0%, 100% { opacity: .5; } 50% { opacity: .85; } }
+@keyframes winspin { to { transform: rotate(360deg); } }
+@keyframes loadslide { 0% { left: -35%; } 100% { left: 100%; } }
 
 @media(prefers-reduced-motion:reduce) {
   *, *::before, *::after { animation-duration: .001ms !important; animation-iteration-count: 1 !important;

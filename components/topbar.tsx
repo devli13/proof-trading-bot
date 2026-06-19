@@ -4,6 +4,7 @@ import { motion, useReducedMotion } from "framer-motion";
 import type { TopbarProps } from "./contracts";
 import { relTime, absTime } from "@/lib/dashboard-lib";
 import { fadeUp, fast, pressable } from "@/lib/motion";
+import { availableRanges } from "@/lib/ranges";
 
 const PILL_LABEL = { green: "live", yellow: "degraded", red: "down" } as const;
 
@@ -24,6 +25,7 @@ export function Topbar({ fleet, onOpenJson }: TopbarProps) {
   const { data, status, pill } = fleet;
   const asOf = data?.asOf ?? null;
   const bots = data?.bots ?? [];
+  const ranges = availableRanges(data?.dataSince, fleet.now);
 
   // Mirror vanilla public/index.html renderPillTip — 7 rows derived from fleet data.
   const alive = bots.filter((b) => b.enabled === true && b.lastTick && fleet.now - Date.parse(b.lastTick) < 10000).length;
@@ -61,6 +63,27 @@ export function Topbar({ fleet, onOpenJson }: TopbarProps) {
       </div>
 
       <div className="topbar-actions">
+        <div className="window-ctl" role="group" aria-label="Time window — applies to the whole page">
+          <span className="seg-cap" title="Time window — applies to the chart, KPIs, and every per-bot metric">
+            window
+          </span>
+          <div className="seg" role="tablist" aria-label="Time window">
+            {ranges.map((r) => (
+              <button
+                key={r}
+                type="button"
+                role="tab"
+                data-range={r}
+                aria-selected={fleet.range === r}
+                onClick={() => fleet.setRange(r)}
+              >
+                {r}
+              </button>
+            ))}
+          </div>
+          {fleet.pending && <span className="win-spin" aria-hidden="true" />}
+        </div>
+
         <div className="pill-wrap" ref={pillWrap}>
           <motion.button
             type="button"

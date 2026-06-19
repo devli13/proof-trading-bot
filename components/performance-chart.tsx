@@ -23,7 +23,7 @@ import {
 } from "chart.js";
 import type { Liveline as LivelineComp, LivelineSeries } from "liveline";
 import type { PerformanceChartProps } from "./contracts";
-import type { BotStat, Range } from "@/lib/types";
+import type { BotStat } from "@/lib/types";
 import { buildDatasets, botMatches, dim, pnlStr, sign, filteredSorted, type BotLike } from "@/lib/dashboard-lib";
 import { fast } from "@/lib/motion";
 
@@ -42,11 +42,6 @@ const Line = dynamic(() => import("react-chartjs-2").then((m) => m.Line), { ssr:
 const Liveline = dynamic(() => import("liveline").then((m) => m.Liveline as typeof LivelineComp), {
   ssr: false,
 }) as typeof LivelineComp;
-
-const RANGES: Range[] = ["1h", "1d", "7d", "30d", "all"];
-// Minimum history span (ms) before a range option is worth offering. 1h/1d/all are
-// always shown; 7d/30d only once dataSince implies we actually have that much history.
-const RANGE_NEED: Record<Range, number> = { "1h": 0, "1d": 0, "7d": 7 * 864e5, "30d": 30 * 864e5, all: 0 };
 
 const fmtTime = (t: number): string =>
   new Date(t).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
@@ -308,20 +303,13 @@ export function PerformanceChart({
   onView,
   mode,
   onMode,
-  range,
-  onRange,
   iso,
   onIso,
-  dataSince,
 }: PerformanceChartProps) {
   const reduced = useReducedMotion() ?? false;
   const [mounted, setMounted] = useState(false);
   const [legendAll, setLegendAll] = useState(false);
   useEffect(() => setMounted(true), []);
-
-  // Which range buttons to offer — gate 7d/30d on having that much history.
-  const span = dataSince ? Date.now() - Date.parse(dataSince) : 0;
-  const ranges = RANGES.filter((r) => !(RANGE_NEED[r] > 0 && span < RANGE_NEED[r]));
 
   // Legend: visible bots with ≥2 series points (mirrors buildDatasets), sorted by pnl desc.
   const legend = useMemo(
@@ -357,33 +345,6 @@ export function PerformanceChart({
           Performance <span className="seg-cap" style={{ marginLeft: "var(--s2)" }}>live</span>
         </h2>
         <span className="spacer" />
-
-        <span
-          className="seg-cap"
-          title="Time window — applies to the chart AND every per-bot PnL metric below"
-        >
-          window
-        </span>
-
-        <div
-          className="seg"
-          id="chart-range"
-          role="tablist"
-          aria-label="Time window (applies to the chart and all per-bot PnL metrics)"
-        >
-          {ranges.map((r) => (
-            <button
-              key={r}
-              type="button"
-              data-range={r}
-              role="tab"
-              aria-selected={range === r}
-              onClick={() => onRange(r)}
-            >
-              {r}
-            </button>
-          ))}
-        </div>
 
         <div className="seg" id="chart-mode" role="tablist" aria-label="Chart metric">
           {(["pnl", "equity"] as const).map((m) => (

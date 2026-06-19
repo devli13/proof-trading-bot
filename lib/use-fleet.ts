@@ -11,6 +11,7 @@ export interface Fleet {
   status: StatusResponse | null;
   range: Range;
   setRange: (r: Range) => void;
+  pending: boolean; // a range-change refetch is in flight (drives the loading UI)
   streamConnected: boolean;
   latencyMs: number | null;
   pill: PillLevel;
@@ -27,7 +28,8 @@ export interface Fleet {
 export function useFleet(initial: StatsResponse | null, initialRange: Range = "1h"): Fleet {
   const [data, setData] = useState<StatsResponse | null>(initial);
   const [status, setStatus] = useState<StatusResponse | null>(null);
-  const [range, setRange] = useState<Range>(initialRange);
+  const [range, setRangeState] = useState<Range>(initialRange);
+  const [pending, setPending] = useState(false);
   const [streamConnected, setStreamConnected] = useState(false);
   const [latencyMs, setLatencyMs] = useState<number | null>(null);
   const [pill, setPill] = useState<PillLevel>("yellow");
@@ -48,7 +50,21 @@ export function useFleet(initial: StatsResponse | null, initialRange: Range = "1
       })
       .catch(() => {
         /* aborted or network blip — keep last good data */
+      })
+      .finally(() => {
+        // Clear the loading state only when the *latest* request settles (a newer
+        // range-change/refetch will have replaced acRef and owns the pending state).
+        if (acRef.current === ac) setPending(false);
       });
+  }, []);
+
+  // Range changes flip `pending` so the UI can show a loading state until the new
+  // window's data lands (the effect below fires an immediate refetch on `range`).
+  const setRange = useCallback((r: Range) => {
+    setRangeState((prev) => {
+      if (prev !== r) setPending(true);
+      return r;
+    });
   }, []);
 
   // Realtime broadcast + polling fallback. Re-runs on range change (immediate refetch).
@@ -146,5 +162,5 @@ export function useFleet(initial: StatsResponse | null, initialRange: Range = "1
     setPill(recomputePillLevel(statsOk, statusOk, dataAge));
   }, [data, status, now]);
 
-  return { data, status, range, setRange, streamConnected, latencyMs, pill, now, refetch };
+  return { data, status, range, setRange, pending, streamConnected, latencyMs, pill, now, refetch };
 }

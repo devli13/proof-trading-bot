@@ -17,11 +17,12 @@ import { BotsTable } from "./bots-table";
 import { Activity } from "./activity";
 import { StrategyReference } from "./strategy-reference";
 import { JsonModal } from "./json-modal";
+import { LoadingBar } from "./loading-bar";
 
 /** Root client component: owns all UI state, derives the filtered/sorted view + filter
  *  options, and wires everything to the live fleet data (realtime + poll). */
 export function Dashboard({ initial }: { initial: StatsResponse | null }) {
-  const fleet = useFleet(initial, "1h");
+  const fleet = useFleet(initial, "1d");
   const data = fleet.data;
   const bots = useMemo(() => data?.bots ?? [], [data]);
 
@@ -100,7 +101,8 @@ export function Dashboard({ initial }: { initial: StatsResponse | null }) {
     : "";
 
   return (
-    <div className="wrap">
+    <div className={"wrap" + (fleet.pending ? " is-updating" : "")}>
+      <LoadingBar active={fleet.pending} />
       <a href="#bots-hub" className="sr-only skip">Skip to fleet</a>
       <div className="sr-only" aria-live="polite" aria-atomic="true">{liveMsg}</div>
       <Topbar fleet={fleet} onOpenJson={() => setJsonOpen(true)} />
