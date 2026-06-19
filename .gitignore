@@ -21,3 +21,8 @@ dist/
 
 # local bot registry seed (keys — never commit)
 bots.json
+
+# supabase CLI local files (config/auth/temp) — never commit
+supabase/
+.branches/
+.temp/

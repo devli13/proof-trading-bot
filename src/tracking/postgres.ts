@@ -101,13 +101,15 @@ begin
 end $$;
 
 create or replace function ${schema}.notify_realtime() returns trigger
-language plpgsql security definer as $body$
+language plpgsql security definer
+set search_path = '' as $body$
 begin
   perform realtime.send(jsonb_build_object('src', tg_table_name), 'change', 'proof_bot_fleet', false);
   return null;
 exception when undefined_function then
   return null; -- non-Supabase Postgres: no realtime.send, no-op
 end $body$;
+revoke execute on function ${schema}.notify_realtime() from public;
 drop trigger if exists trg_notify_snapshots on ${schema}.bot_snapshots;
 create trigger trg_notify_snapshots after insert on ${schema}.bot_snapshots
   for each statement execute function ${schema}.notify_realtime();
