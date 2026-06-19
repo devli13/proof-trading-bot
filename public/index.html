@@ -62,6 +62,7 @@
       .chart-head .spacer{flex:1;}
       .chartbox{height:clamp(220px,40vw,300px);position:relative;}
       .chart-empty{position:absolute;inset:0;display:grid;place-items:center;font-size:var(--fz-1);}
+      .chart-empty[hidden]{display:none;}
       .legend{display:flex;flex-wrap:wrap;gap:var(--s1) var(--s3);margin-top:var(--s3);}
       .leg{display:inline-flex;align-items:center;gap:var(--s1);background:transparent;border:0;
         color:var(--tx-4);font:inherit;font-size:var(--fz-0);cursor:pointer;padding:2px var(--s1);border-radius:var(--r-sm);}
@@ -666,8 +667,10 @@
         const pill = document.getElementById("pill");
         const dataAge = DATA && DATA.asOf ? Date.now() - Date.parse(DATA.asOf) : Infinity;
         let level;
-        if (statsOk && statusOk && lastLatency != null && lastLatency < 800 && dataAge < 30000) level = "green";
-        else if (!statusOk || !statsOk || (lastLatency != null && lastLatency > 2500) || dataAge > 120000) level = "red";
+        // "live" = fresh data flowing + both read endpoints up. Latency is shown in the
+        // tooltip but doesn't gate green (the /api/status gateway hop can be slow).
+        if (statsOk && statusOk && dataAge < 30000) level = "green";
+        else if (!statsOk || dataAge > 180000) level = "red";
         else level = "yellow";
         pill.dataset.level = level;
         pill.querySelector(".pill-label").textContent = { green: "live", yellow: "degraded", red: "down" }[level];

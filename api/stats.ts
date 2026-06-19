@@ -193,9 +193,13 @@ export default async function handler(
       trades: bots.reduce((a, b) => a + b.trades, 0),
     };
 
+    // Most-recent snapshot across the WHOLE fleet (latest is one row per bot, so
+    // latest[0] would be the alphabetically-first bot — often a stale/disabled one).
+    const asOf = latest.reduce((m, r) => (m == null || r.ts > m ? r.ts : m), null);
+
     res.status(200).json({
       ok: true,
-      asOf: latest[0]?.ts ?? null,
+      asOf,
       range: rangeKey,
       dataSince: sinceRow[0]?.since ?? null,
       aggregate,

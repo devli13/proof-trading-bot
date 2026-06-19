@@ -1,7 +1,7 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "cleanUrls": true,
-  "rewrites": [{ "source": "/dashboard", "destination": "/index.html" }],
+  "redirects": [{ "source": "/dashboard", "destination": "/", "permanent": false }],
   "functions": {
     "api/tick.ts": { "maxDuration": 60 }
   }
