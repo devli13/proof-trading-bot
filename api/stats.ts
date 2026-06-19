@@ -26,8 +26,22 @@ const STRATEGY_LOGIC: Record<string, string> = {
     "Maximizes turnover/volatility on a stale book — opens real positions and unwinds when sensible (not wash trades). Loss-capped; devnet-only.",
 };
 
+/**
+ * Chart timeframe windows for the equity series (?range=). Each maps to a lower
+ * time bound (null = all-time) and a date_trunc bucket that keeps point counts
+ * bounded as the window grows. Drives the chart, the per-bot sparkline, and the
+ * per-bot PnL baseline (first-vs-last equity within the window).
+ */
+const RANGES: Record<string, { interval: string | null; bucket: string }> = {
+  "1h": { interval: "1 hour", bucket: "minute" },
+  "1d": { interval: "24 hours", bucket: "minute" },
+  "7d": { interval: "7 days", bucket: "hour" },
+  "30d": { interval: "30 days", bucket: "hour" },
+  all: { interval: null, bucket: "hour" },
+};
+
 export default async function handler(
-  _req: VercelRequest,
+  req: VercelRequest,
   res: VercelResponse,
 ): Promise<void> {
   const url = process.env.DATABASE_URL;
@@ -46,6 +60,26 @@ export default async function handler(
       onnotice: () => {},
     });
     const t = (name: string) => sql`${sql(schema)}.${sql(name)}`;
+
+    // Per-bot deep history (?bot=<id>) — the drill-down drawer asks for ONE bot's
+    // full 24h orders + decision breakdown, beyond the global 60/200 firehose caps.
+    // Additive + read-only; never selects the key column.
+    const botParam = typeof req.query.bot === "string" ? req.query.bot : undefined;
+    if (botParam) {
+      const [orders, decs] = await Promise.all([
+        sql`select bot, ts, strategy, kind, market, side, price, quantity, check_tx_code
+            from ${t("bot_orders")}
+            where bot = ${botParam} and (note is null or note <> 'dry-run') and strategy <> 'audit-prep'
+            order by ts desc limit 300`,
+        sql`select strategy, action, count(*)::int as c, max(ts) as last
+            from ${t("bot_decisions")}
+            where bot = ${botParam} and ts > now() - interval '24 hours'
+            group by strategy, action order by c desc`,
+      ]);
+      await sql.end({ timeout: 3 });
+      res.status(200).json({ ok: true, bot: botParam, recentOrders: orders, decisions: decs });
+      return;
+    }
 
     // Registry (NO keys). Tolerate the table not existing yet.
     let registry: Array<Record<string, unknown>> = [];
@@ -67,12 +101,21 @@ export default async function handler(
       where (note is null or note <> 'dry-run') and strategy <> 'audit-prep'
       group by bot`;
 
-    // Minute-bucketed equity series per bot (bounded points for the chart).
-    const series = await sql`select bot, date_trunc('minute', ts) as m,
+    // Equity series per bot, windowed + bucketed by the selected chart range
+    // (?range=1h|1d|7d|30d|all, default 1d). Drives the chart + per-bot PnL baseline.
+    const rangeKey =
+      typeof req.query.range === "string" && req.query.range in RANGES ? req.query.range : "1d";
+    const { interval, bucket } = RANGES[rangeKey] ?? { interval: "24 hours", bucket: "minute" };
+    const sinceClause = interval ? sql`and ts > now() - ${interval}::interval` : sql``;
+    const series = await sql`select bot, date_trunc(${bucket}, ts) as m,
         (array_agg(equity order by ts desc))[1] as equity
       from ${t("bot_snapshots")}
-      where ts > now() - interval '24 hours' and equity::numeric > 0
+      where equity::numeric > 0 ${sinceClause}
       group by bot, m order by m asc`;
+
+    // Earliest snapshot overall — lets the client hide timeframe options that would
+    // just duplicate "all" (e.g. hide 7d/30d when there's <7d/<30d of history).
+    const sinceRow = await sql`select min(ts) as since from ${t("bot_snapshots")}`;
 
     // Strategy-tagged decision activity + recent orders.
     const decisions = await sql`select bot, strategy, action, count(*)::int as c, max(ts) as last
@@ -153,6 +196,8 @@ export default async function handler(
     res.status(200).json({
       ok: true,
       asOf: latest[0]?.ts ?? null,
+      range: rangeKey,
+      dataSince: sinceRow[0]?.since ?? null,
       aggregate,
       bots,
       decisions,

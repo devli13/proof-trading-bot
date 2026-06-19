@@ -181,8 +181,8 @@ static dashboard + read-only API. Surfaces:
 
 | Route          | What                                                                 |
 | -------------- | ------------------------------------------------------------------- |
-| `/`            | Status home ([`public/index.html`](public/index.html)).             |
-| `/dashboard`   | Fleet view: per-bot PnL/volume/strategy-logic, filters, hover charts. |
+| `/`            | **Fleet dashboard** ([`public/index.html`](public/index.html)) — live per-bot PnL/volume/strategy, click-a-bot drill-down, status pill, timeframe chart. |
+| `/dashboard`   | Alias of `/` (rewrite) — back-compat for old links/bookmarks.        |
 | `/api/status`  | Chain height + (if `PROOF_PRIVATE_KEY` set) account balance.         |
 | `/api/stats`   | Multi-bot stats JSON (per-bot breakdown; never the keys).            |
 | `/api/tick`    | One single-bot tick, fail-closed by `CRON_SECRET` (manual/testing).  |
