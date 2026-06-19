@@ -11,7 +11,10 @@ services:
     region: oregon
     autoDeploy: true
     # devDependencies (tsx) are needed at runtime — do not set NODE_ENV=production.
-    buildCommand: corepack enable && pnpm install
+    # pnpm is provisioned by Render from the `packageManager` field (corepack) —
+    # do NOT run `corepack enable` here: Render's Node image has a read-only
+    # /usr/bin with pnpm already present, so `corepack enable` fails with EROFS.
+    buildCommand: pnpm install
     startCommand: pnpm worker
     envVars:
       - key: PROOF_NETWORK
