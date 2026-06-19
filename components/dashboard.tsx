@@ -11,6 +11,7 @@ import { Topbar } from "./topbar";
 import { KpiCards } from "./kpi-cards";
 import { PerformanceChart } from "./performance-chart";
 import { Insights } from "./insights";
+import { TradeAnalysis } from "./trade-analysis";
 import { Filters } from "./filters";
 import { BotsTable } from "./bots-table";
 import { Activity } from "./activity";
@@ -119,6 +120,7 @@ export function Dashboard({ initial }: { initial: StatsResponse | null }) {
         dataSince={data?.dataSince ?? null}
       />
       <Insights bots={visible} colors={colors} />
+      <TradeAnalysis />
       <Filters filter={filter} onChange={setFilter} strategies={strategies} tags={tags} markets={markets} count={count} />
       <LayoutGroup>
         <BotsTable

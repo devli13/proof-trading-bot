@@ -91,3 +91,22 @@ export interface FilterState {
 }
 
 export type PillLevel = "green" | "yellow" | "red";
+
+export interface TradeBucket {
+  bk: number;
+  label: string;
+  trades: number;
+  avgNotional: number | null; // micro-USDC
+  minNotional: number | null;
+  maxNotional: number | null;
+  winRate: number | null; // 0..1 (favorable next-move share)
+  avgFavBps: number | null; // avg favorable price move, bps
+  avgImpactBps: number | null; // avg |price move| after the trade, bps
+}
+
+export interface TradeAnalysisResponse {
+  ok: boolean;
+  hours?: number;
+  buckets?: TradeBucket[];
+  error?: string;
+}
