@@ -32,6 +32,10 @@ create table if not exists ${schema}.bot_orders (
 alter table ${schema}.bot_orders add column if not exists bot text not null default 'main';
 create index if not exists bot_orders_bot_ts_idx on ${schema}.bot_orders (bot, ts);
 create index if not exists bot_orders_strategy_ts_idx on ${schema}.bot_orders (strategy, ts);
+-- ts-leading index for the fleet-volume aggregate + recent-orders (order by ts desc) +
+-- windowed metrics, which filter/sort on ts alone (the bot/strategy-leading indexes above
+-- can't serve those). Keeps larger windows (1d/all) fast as order volume grows.
+create index if not exists bot_orders_ts_idx on ${schema}.bot_orders (ts);
 
 create table if not exists ${schema}.bot_snapshots (
   id bigserial primary key,
