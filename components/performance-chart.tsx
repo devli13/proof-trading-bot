@@ -23,6 +23,7 @@ import {
 } from "chart.js";
 import type { Liveline as LivelineComp, LivelineSeries } from "liveline";
 import type { PerformanceChartProps } from "./contracts";
+import { ChartSkeleton } from "./chart-skeleton";
 import type { BotStat } from "@/lib/types";
 import { buildDatasets, botMatches, dim, pnlStr, sign, filteredSorted, type BotLike } from "@/lib/dashboard-lib";
 import { fast } from "@/lib/motion";
@@ -305,6 +306,8 @@ export function PerformanceChart({
   onMode,
   iso,
   onIso,
+  range,
+  loading,
 }: PerformanceChartProps) {
   const reduced = useReducedMotion() ?? false;
   const [mounted, setMounted] = useState(false);
@@ -367,6 +370,8 @@ export function PerformanceChart({
           <div className="skel skel-chart" />
         ) : hasData ? (
           <HistoryChart bots={bots} filter={filter} colors={colors} mode={mode} iso={iso} />
+        ) : loading ? (
+          <ChartSkeleton range={range} />
         ) : (
           <div className="chart-empty muted">no equity history in range</div>
         )}

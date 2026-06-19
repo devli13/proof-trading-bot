@@ -20,10 +20,10 @@ describe("rangeConfig", () => {
     expect(rangeConfig("nonsense").key).toBe("1d");
     expect(rangeConfig(7 as unknown).key).toBe("1d");
   });
-  it("resolves each valid range to its window + bucket", () => {
-    expect(rangeConfig("1h")).toEqual({ key: "1h", interval: "1 hour", bucket: "minute" });
-    expect(rangeConfig("7d")).toEqual({ key: "7d", interval: "7 days", bucket: "hour" });
-    expect(rangeConfig("all")).toEqual({ key: "all", interval: null, bucket: "hour" });
+  it("resolves each valid range to its window + bin", () => {
+    expect(rangeConfig("1h")).toEqual({ key: "1h", interval: "1 hour", bin: "1 minute" });
+    expect(rangeConfig("7d")).toEqual({ key: "7d", interval: "7 days", bin: "30 minutes" });
+    expect(rangeConfig("all")).toEqual({ key: "all", interval: null, bin: "1 hour" });
   });
   it("rejects prototype-chain keys (hasOwnProperty, not `in`)", () => {
     // "toString"/"constructor" are inherited — must fall back to 1d, not crash.

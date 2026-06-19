@@ -7,21 +7,23 @@ import { buildMetrics, type MetricsRow, type BotMetrics } from "./stats-metrics.
 
 export type { MetricsRow, BotMetrics } from "./stats-metrics.js";
 
-/** Chart timeframe windows for the equity series (?range=). */
-export const RANGES: Record<string, { interval: string | null; bucket: string }> = {
-  "1h": { interval: "1 hour", bucket: "minute" },
-  "1d": { interval: "24 hours", bucket: "minute" },
-  "7d": { interval: "7 days", bucket: "hour" },
-  "30d": { interval: "30 days", bucket: "hour" },
-  all: { interval: null, bucket: "hour" },
+/** Chart timeframe windows for the equity series (?range=). `bin` is a date_bin stride —
+ *  kept coarse enough that even a wide window returns a few hundred points/bot, not
+ *  thousands (1d at 1-minute was ~1440/bot → slow query + huge payload + heavy chart). */
+export const RANGES: Record<string, { interval: string | null; bin: string }> = {
+  "1h": { interval: "1 hour", bin: "1 minute" },
+  "1d": { interval: "24 hours", bin: "5 minutes" },
+  "7d": { interval: "7 days", bin: "30 minutes" },
+  "30d": { interval: "30 days", bin: "2 hours" },
+  all: { interval: null, bin: "1 hour" },
 };
 
 /** Resolve a ?range value to its window config (defaults to 1d). Uses hasOwnProperty
  *  (not `in`) so prototype keys like "toString"/"constructor" fall back to 1d. */
-export function rangeConfig(range: unknown): { key: string; interval: string | null; bucket: string } {
+export function rangeConfig(range: unknown): { key: string; interval: string | null; bin: string } {
   const key = typeof range === "string" && Object.prototype.hasOwnProperty.call(RANGES, range) ? range : "1d";
-  const cfg = RANGES[key] ?? { interval: "24 hours", bucket: "minute" };
-  return { key, interval: cfg.interval, bucket: cfg.bucket };
+  const cfg = RANGES[key] ?? { interval: "24 hours", bin: "5 minutes" };
+  return { key, interval: cfg.interval, bin: cfg.bin };
 }
 
 export const STRATEGY_LOGIC: Record<string, string> = {

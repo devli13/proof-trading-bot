@@ -56,6 +56,7 @@ export interface PerformanceChartProps {
   iso: string | null;
   onIso: (id: string | null) => void;
   dataSince: string | null;
+  loading: boolean;
 }
 
 export interface FiltersProps {

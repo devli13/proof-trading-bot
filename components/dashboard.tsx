@@ -125,6 +125,7 @@ export function Dashboard({ initial }: { initial: StatsResponse | null }) {
         iso={iso}
         onIso={setIso}
         dataSince={data?.dataSince ?? null}
+        loading={!data || fleet.pending}
       />
       <Insights bots={visible} colors={colors} />
       <TradeAnalysis />

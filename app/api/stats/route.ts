@@ -28,7 +28,10 @@ export async function GET(req: Request): Promise<Response> {
 
   try {
     const { default: postgres } = await import("postgres");
-    const sql = postgres(url, { max: 1, prepare: false, idle_timeout: 5, connect_timeout: 10, onnotice: () => {} });
+    // A small pool (not max:1) so the independent dashboard queries below can run
+    // CONCURRENTLY via Promise.all instead of serializing on one connection — that
+    // sequential add-up was the bulk of the ~2.6s baseline latency.
+    const sql = postgres(url, { max: 8, prepare: false, idle_timeout: 5, connect_timeout: 10, onnotice: () => {} });
     const t = (name: string) => sql`${sql(schema)}.${sql(name)}`;
 
     // Global strategy-change log (?changes=1) — fleet-wide audit timeline.
@@ -67,58 +70,55 @@ export async function GET(req: Request): Promise<Response> {
       return Response.json({ ok: true, bot: botParam, recentOrders: orders, decisions: decs, changes });
     }
 
-    let registry: Array<Record<string, unknown>> = [];
-    try {
-      registry = await sql`select id, strategies, markets, tags, enabled from ${t("bots")} order by id`;
-    } catch {
-      registry = [];
-    }
-
-    const latest = await sql`select distinct on (bot) bot, equity, balance, positions, ts
-      from ${t("bot_snapshots")} order by bot, ts desc`;
-
-    const vol = await sql`select bot,
-        count(*)::int as trades,
-        coalesce(sum((price::numeric) * (quantity::numeric) / 100), 0)::text as volume_micro,
-        max(ts) as last_trade
-      from ${t("bot_orders")}
-      where (note is null or note <> 'dry-run') and strategy <> 'audit-prep'
-      group by bot`;
-
-    const { key: rangeKey, interval, bucket } = rangeConfig(params.get("range"));
+    const { key: rangeKey, interval, bin } = rangeConfig(params.get("range"));
     const sinceClause = interval ? sql`and ts > now() - ${interval}::interval` : sql``;
-    const series = await sql`select bot, date_trunc(${bucket}, ts) as m,
-        (array_agg(equity order by ts desc))[1] as equity
-      from ${t("bot_snapshots")}
-      where equity::numeric > 0 ${sinceClause}
-      group by bot, m order by m asc`;
 
-    // Fleet trading volume per bucket (micro-USDC) — for the top-strip volume sparkline.
-    const fleetVol = await sql`select date_trunc(${bucket}, ts) as m,
-        coalesce(sum((price::numeric) * (quantity::numeric) / 100), 0) as vol
-      from ${t("bot_orders")}
-      where (note is null or note <> 'dry-run') and strategy <> 'audit-prep' ${sinceClause}
-      group by m order by m asc`;
-
-    const metricsRows = await sql`select bot,
-        coalesce(avg((price::numeric) * (quantity::numeric) / 100), 0) as avg_trade_micro,
-        count(*) filter (where ts > now() - interval '1 hour') as last_hour_trades,
-        extract(epoch from (max(ts) - min(ts))) / 3600 as span_hours,
-        count(*)::int as trades_window,
-        avg((kind = 'order' and strategy = 'market-maker')::int) as maker_pct,
-        avg((check_tx_code is not null and check_tx_code <> 0)::int) as reject_rate,
-        coalesce(sum(case when side = 'Buy' then 1 else -1 end * (price::numeric) * (quantity::numeric) / 100), 0) as net_flow_micro
-      from ${t("bot_orders")}
-      where (note is null or note <> 'dry-run') and strategy <> 'audit-prep' ${sinceClause}
-      group by bot`;
-
-    const sinceRow = await sql`select min(ts) as since from ${t("bot_snapshots")}`;
-    const decisions = await sql`select bot, strategy, action, count(*)::int as c, max(ts) as last
-      from ${t("bot_decisions")} where ts > now() - interval '24 hours'
-      group by bot, strategy, action order by c desc limit 200`;
-    const recent = await sql`select bot, ts, strategy, kind, market, side, price, quantity, check_tx_code
-      from ${t("bot_orders")} where (note is null or note <> 'dry-run') and strategy <> 'audit-prep'
-      order by ts desc limit 60`;
+    // Every query below is independent → run them CONCURRENTLY (the pool makes this real
+    // parallelism, so total latency ≈ the slowest query, not the sum of all nine).
+    const [registry, latest, vol, series, fleetVol, metricsRows, sinceRow, decisions, recent] = await Promise.all([
+      sql`select id, strategies, markets, tags, enabled from ${t("bots")} order by id`.catch(
+        () => [] as Array<Record<string, unknown>>,
+      ),
+      sql`select distinct on (bot) bot, equity, balance, positions, ts
+        from ${t("bot_snapshots")} order by bot, ts desc`,
+      sql`select bot,
+          count(*)::int as trades,
+          coalesce(sum((price::numeric) * (quantity::numeric) / 100), 0)::text as volume_micro,
+          max(ts) as last_trade
+        from ${t("bot_orders")}
+        where (note is null or note <> 'dry-run') and strategy <> 'audit-prep'
+        group by bot`,
+      // Bucketed equity per bot via date_bin (coarse stride → a few hundred points, not thousands).
+      sql`select bot, date_bin(${bin}::interval, ts, timestamptz '2000-01-01 00:00:00+00') as m,
+          (array_agg(equity order by ts desc))[1] as equity
+        from ${t("bot_snapshots")}
+        where equity::numeric > 0 ${sinceClause}
+        group by bot, m order by m asc`,
+      // Fleet trading volume per bucket (micro-USDC) — for the top-strip volume sparkline.
+      sql`select date_bin(${bin}::interval, ts, timestamptz '2000-01-01 00:00:00+00') as m,
+          coalesce(sum((price::numeric) * (quantity::numeric) / 100), 0) as vol
+        from ${t("bot_orders")}
+        where (note is null or note <> 'dry-run') and strategy <> 'audit-prep' ${sinceClause}
+        group by m order by m asc`,
+      sql`select bot,
+          coalesce(avg((price::numeric) * (quantity::numeric) / 100), 0) as avg_trade_micro,
+          count(*) filter (where ts > now() - interval '1 hour') as last_hour_trades,
+          extract(epoch from (max(ts) - min(ts))) / 3600 as span_hours,
+          count(*)::int as trades_window,
+          avg((kind = 'order' and strategy = 'market-maker')::int) as maker_pct,
+          avg((check_tx_code is not null and check_tx_code <> 0)::int) as reject_rate,
+          coalesce(sum(case when side = 'Buy' then 1 else -1 end * (price::numeric) * (quantity::numeric) / 100), 0) as net_flow_micro
+        from ${t("bot_orders")}
+        where (note is null or note <> 'dry-run') and strategy <> 'audit-prep' ${sinceClause}
+        group by bot`,
+      sql`select min(ts) as since from ${t("bot_snapshots")}`,
+      sql`select bot, strategy, action, count(*)::int as c, max(ts) as last
+        from ${t("bot_decisions")} where ts > now() - interval '24 hours'
+        group by bot, strategy, action order by c desc limit 200`,
+      sql`select bot, ts, strategy, kind, market, side, price, quantity, check_tx_code
+        from ${t("bot_orders")} where (note is null or note <> 'dry-run') and strategy <> 'audit-prep'
+        order by ts desc limit 60`,
+    ]);
 
     await sql.end({ timeout: 3 });
 
