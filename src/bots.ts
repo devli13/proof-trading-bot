@@ -131,6 +131,37 @@ export async function addBot(config: Config, args: AddBotArgs): Promise<void> {
   }
 }
 
+export interface UpdateBotArgs {
+  params?: Record<string, string>;
+  strategies?: string[];
+  markets?: number[] | "all";
+  tags?: string[];
+}
+
+/**
+ * Update an EXISTING bot's non-key fields (params/strategies/markets/tags) WITHOUT
+ * re-supplying its private key — so a bot can be re-tuned even when we no longer hold
+ * its key locally. NEVER touches private_key_enc. The worker hot-reloads the change
+ * (specHash includes params/strategies/markets/tags).
+ */
+export async function updateBot(config: Config, id: string, args: UpdateBotArgs): Promise<void> {
+  const sql = await openRegistrySql(config);
+  try {
+    await sql.unsafe(migrationSql(config.dbSchema));
+    const parts: ReturnType<Sql>[] = [];
+    if (args.params !== undefined) parts.push(sql`params = ${sql.json(args.params as never)}`);
+    if (args.strategies !== undefined) parts.push(sql`strategies = ${args.strategies}`);
+    if (args.markets !== undefined) parts.push(sql`markets = ${sql.json(args.markets as never)}`);
+    if (args.tags !== undefined) parts.push(sql`tags = ${args.tags}`);
+    if (parts.length === 0) throw new Error("updateBot: nothing to update");
+    const setClause = parts.reduce((acc, p) => sql`${acc}, ${p}`);
+    const res = await sql`update ${table(sql, config.dbSchema, "bots")} set ${setClause} where id = ${id}`;
+    if (res.count === 0) throw new Error(`no bot with id "${id}"`);
+  } finally {
+    await sql.end({ timeout: 3 });
+  }
+}
+
 /** Roster WITHOUT keys — for `pnpm bots list` and (read-only) dashboards. */
 export async function listBots(config: Config): Promise<BotInfo[]> {
   const sql = await openRegistrySql(config);

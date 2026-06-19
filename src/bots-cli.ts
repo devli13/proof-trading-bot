@@ -1,6 +1,7 @@
 import type { Config } from "./config.js";
 import type { Logger } from "./logger.js";
-import { addBot, listBots, disableBot, enableBot } from "./bots.js";
+import { addBot, listBots, disableBot, enableBot, updateBot } from "./bots.js";
+import type { UpdateBotArgs } from "./bots.js";
 
 /**
  * `pnpm bots <subcommand>` — manage the registry. Keys are never printed.
@@ -63,6 +64,38 @@ export async function botsCommand(config: Config, logger: Logger, argv: string[]
       return;
     }
 
+    case "update": {
+      // Re-tune an existing bot WITHOUT its key (params/strategies/tags/markets only).
+      //   pnpm bots update <id> [--params <json>] [--strategies a,b] [--tags a,b] [--markets all|1,2]
+      const id = argv[1];
+      if (!id) throw new Error("usage: bots update <id> [--params <json>] [--strategies a,b] [--tags a,b] [--markets all|ids]");
+      const out: UpdateBotArgs = {};
+      for (let i = 2; i < argv.length; i += 2) {
+        const flag = argv[i];
+        const val = argv[i + 1];
+        if (val === undefined) throw new Error(`missing value for ${flag}`);
+        if (flag === "--params") {
+          try {
+            out.params = JSON.parse(val) as Record<string, string>;
+          } catch {
+            throw new Error(`--params is not valid JSON: ${val}`);
+          }
+        } else if (flag === "--strategies") {
+          out.strategies = val.split(",").map((s) => s.trim()).filter(Boolean);
+        } else if (flag === "--tags") {
+          out.tags = val.split(",").map((s) => s.trim()).filter(Boolean);
+        } else if (flag === "--markets") {
+          out.markets = val === "all" ? "all" : val.split(",").map((m) => Number(m.trim())).filter((n) => Number.isFinite(n) && n > 0);
+        } else {
+          throw new Error(`unknown flag "${flag}" (use --params/--strategies/--tags/--markets)`);
+        }
+      }
+      if (Object.keys(out).length === 0) throw new Error("nothing to update — pass at least one of --params/--strategies/--tags/--markets");
+      await updateBot(config, id, out);
+      logger.info({ id, updated: Object.keys(out) }, "bots: updated (key untouched)");
+      return;
+    }
+
     case "disable":
       if (!argv[1]) throw new Error("usage: bots disable <id>");
       await disableBot(config, argv[1]);
@@ -76,6 +109,6 @@ export async function botsCommand(config: Config, logger: Logger, argv: string[]
       return;
 
     default:
-      throw new Error(`unknown bots subcommand "${sub}" — use: list | add | disable | enable`);
+      throw new Error(`unknown bots subcommand "${sub}" — use: list | add | update | disable | enable`);
   }
 }

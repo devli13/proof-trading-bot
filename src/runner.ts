@@ -149,6 +149,20 @@ export class BotEngine {
 
     if (account) void this.recordSnapshot(account, now);
 
+    // Unreadable account → SKIP this tick (checked BEFORE the kill-switch): don't trade
+    // blind (positionFor would read flat and a directional/volume strategy could re-enter
+    // a position it already holds), and don't permanently halt on a transient read blip.
+    if (!account) {
+      void this.tracker.recordDecision({
+        bot: this.botId,
+        ts: now,
+        strategy: "engine",
+        action: "skip-tick",
+        detail: { reason: "account unreadable — not trading blind" },
+      });
+      return { halted: false };
+    }
+
     const verdict = checkAccount(account, this.riskState, this.config);
     if (!verdict.ok) {
       this.logger.error({ bot: this.botId, reason: verdict.reason }, "RISK: kill-switch — cancelling all + halting");
@@ -168,19 +182,6 @@ export class BotEngine {
         }
       }
       return { halted: true, reason: verdict.reason, equity: verdict.equity.toString() };
-    }
-
-    // Never trade on an unreadable account: positionFor would read flat and a
-    // directional/volume strategy could re-enter a position it already holds.
-    if (!account) {
-      void this.tracker.recordDecision({
-        bot: this.botId,
-        ts: now,
-        strategy: "engine",
-        action: "skip-tick",
-        detail: { reason: "account unreadable — not trading blind" },
-      });
-      return { halted: false };
     }
 
     const view = { positions: account.positions, equity: account.equity };

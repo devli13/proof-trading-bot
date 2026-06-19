@@ -63,6 +63,8 @@
       .chartbox{height:clamp(220px,40vw,300px);position:relative;}
       .chart-empty{position:absolute;inset:0;display:grid;place-items:center;font-size:var(--fz-1);}
       .chart-empty[hidden]{display:none;}
+      #livechart{position:absolute;inset:0;width:100%;height:100%;}
+      #livechart[hidden]{display:none;}
       .legend{display:flex;flex-wrap:wrap;gap:var(--s1) var(--s3);margin-top:var(--s3);}
       .leg{display:inline-flex;align-items:center;gap:var(--s1);background:transparent;border:0;
         color:var(--tx-4);font:inherit;font-size:var(--fz-0);cursor:pointer;padding:2px var(--s1);border-radius:var(--r-sm);}
@@ -258,9 +260,13 @@
         <div class="chart-head">
           <h2>Performance</h2>
           <span class="spacer"></span>
+          <div class="seg" id="chart-view" role="tablist" aria-label="Chart view">
+            <button data-view="history" role="tab" aria-selected="true">History</button>
+            <button data-view="live" role="tab" aria-selected="false">Live</button>
+          </div>
           <div class="seg" id="chart-range" role="tablist" aria-label="Timeframe">
-            <button data-range="1h" role="tab" aria-selected="false">1h</button>
-            <button data-range="1d" role="tab" aria-selected="true">1d</button>
+            <button data-range="1h" role="tab" aria-selected="true">1h</button>
+            <button data-range="1d" role="tab" aria-selected="false">1d</button>
             <button data-range="7d" role="tab" aria-selected="false" hidden>7d</button>
             <button data-range="30d" role="tab" aria-selected="false" hidden>30d</button>
             <button data-range="all" role="tab" aria-selected="false">all</button>
@@ -272,6 +278,7 @@
         </div>
         <div class="chartbox" aria-busy="true">
           <canvas id="chart" role="img" aria-label="P&L since start per bot"></canvas>
+          <canvas id="livechart" hidden aria-label="live PnL stream per bot"></canvas>
           <div id="chart-empty" class="chart-empty muted" hidden>no equity history in range</div>
         </div>
         <div id="chart-legend" class="legend"></div>
@@ -331,27 +338,16 @@
       </div>
     </div>
 
-    <script>
-      // ── helpers ──────────────────────────────────────────────────────────
-      const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
-      const MKT = { 7: "HYPE", 20300: "HYPE-CPY", 20301: "HYPE-CPN", 20302: "HYPE-EBY", 20303: "HYPE-EBN", 203: "HYPE #203" };
-      const mkt = (m) => MKT[m] || ("m" + m);
-      const usd = (m) => { if (m == null || isNaN(m)) return "—"; const v = m / 1e6; return (v < 0 ? "-" : "") + "$" + Math.abs(v).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }); };
-      const pnlStr = (m) => { if (m == null || isNaN(m)) return "—"; const v = m / 1e6; const g = v > 0 ? "+" : v < 0 ? "-" : ""; return g + "$" + Math.abs(v).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }); };
-      const sign = (n) => (n == null ? "" : n > 0 ? "pos" : n < 0 ? "neg" : "");
-      const relTime = (t) => { if (!t) return "—"; const s = (Date.now() - Date.parse(t)) / 1000; if (s < 0) return "just now"; if (s < 10) return "just now"; if (s < 60) return Math.floor(s) + "s ago"; if (s < 3600) return Math.floor(s / 60) + "m ago"; if (s < 86400) return Math.floor(s / 3600) + "h ago"; return Math.floor(s / 86400) + "d ago"; };
-      const absTime = (t) => (t ? new Date(t).toLocaleString() : "");
-      // Only registry-enabled bots can be alive/stale; legacy (main, enabled=null) and
-      // disabled bots get a hollow "off" dot — they aren't part of the running fleet.
-      const dotClass = (b) => (b.enabled !== true ? "off" : b.lastTick && Date.now() - Date.parse(b.lastTick) < 10000 ? "alive" : "stale");
-      const dotWord = (c) => ({ off: "Inactive", alive: "Alive", stale: "Stale" }[c] || "");
-      const dim = (hex, a) => hex + Math.round(a * 255).toString(16).padStart(2, "0");
-      const side = (s) => s === "Buy" ? '<span class="side"><span class="glyph">▲</span> Buy</span>' : '<span class="side"><span class="glyph">▼</span> Sell</span>';
-      const num = (v) => (v == null ? 0 : Number(v));
+    <script type="module">
+      // ── helpers (pure, unit-tested in dashboard-lib.js) ──────────────────
+      import * as DL from "./dashboard-lib.js";
+      import { LiveChart } from "./livechart.js";
+      const { esc, mkt, usd, pnlStr, sign, relTime, absTime, dotClass, dotWord, dim, side, num } = DL;
 
       // ── state ────────────────────────────────────────────────────────────
       let DATA = null, STATUS = null, lastLatency = null, statsOk = false, statusOk = false, prevLevel = null;
-      let chart = null, chartMode = "pnl", isoBot = null, currentRange = "1d", firstData = true;
+      let chart = null, chartMode = "pnl", isoBot = null, currentRange = "1h", firstData = true;
+      let chartView = "history", live = null; // "history" = Chart.js; "live" = LiveChart canvas
       const COLOR = {}; const sparks = new Map(); const ROLLERS = {};
       const F = { scope: "active", strategy: "all", tag: "all", market: "all" };
       const expanded = new Set();
@@ -363,7 +359,7 @@
       const LINE_COLORS = ["#7aa2ff", "#c792ea", "#4dd0e1", "#ffd166", "#a3e635", "#f78fb3", "#60a5fa", "#34d399", "#e0a3ff", "#5eead4", "#fbbf24", "#93c5fd"];
       const COLS = [
         { k: "bot", t: "Bot", l: 1 }, { k: "strategies", t: "Strategies", l: 1 }, { k: "markets", t: "Markets", l: 1 },
-        { k: "pnl", t: "PnL" }, { k: "equity", t: "Equity" }, { k: "volume", t: "Vol" }, { k: "trades", t: "Trades" }, { k: "lastTick", t: "Tick" },
+        { k: "pnl", t: "PnL" }, { k: "equity", t: "Equity" }, { k: "volume", t: "Vol" }, { k: "trades", t: "Trades" }, { k: "lastTrade", t: "Last trade" },
       ];
 
       // ── progress bar ─────────────────────────────────────────────────────
@@ -447,19 +443,8 @@
         fillSelect("f-tag", [...new Set(inScope.flatMap((b) => b.tags || []))].sort(), "tags");
         fillSelect("f-market", [...new Set(inScope.flatMap((b) => (b.markets === "all" ? [] : b.markets || [])))].sort((a, b) => a - b), "markets", mkt);
       }
-      function botMatches(b) {
-        if (F.scope === "active" && b.enabled !== true) return false;
-        if (F.strategy !== "all" && !(b.strategies || []).includes(F.strategy)) return false;
-        if (F.tag !== "all" && !(b.tags || []).includes(F.tag)) return false;
-        if (F.market !== "all" && b.markets !== "all" && !(b.markets || []).map(String).includes(F.market)) return false;
-        return true;
-      }
-      function filteredSorted() {
-        const list = DATA.bots.filter(botMatches);
-        const val = (b) => (sortKey === "bot" ? b.bot : b[sortKey] ?? -Infinity);
-        list.sort((a, c) => { const x = val(a), y = val(c); if (x < y) return -1 * sortDir; if (x > y) return 1 * sortDir; return a.bot < c.bot ? -1 : 1; });
-        return list;
-      }
+      const botMatches = (b) => DL.botMatches(b, F);
+      const filteredSorted = () => DL.filteredSorted(DATA.bots, F, sortKey, sortDir);
 
       // ── bots table rows + drawers ────────────────────────────────────────
       function cellHTML(b, key) {
@@ -471,7 +456,7 @@
           case "equity": return `<td class="num" data-cell="equity">${usd(b.equity)}</td>`;
           case "volume": return `<td class="num" data-cell="volume">${usd(b.volume)}</td>`;
           case "trades": return `<td class="num" data-cell="trades">${b.trades ?? 0}</td>`;
-          case "lastTick": return `<td class="num"><time class="ago" datetime="${esc(b.lastTick)}" title="${esc(absTime(b.lastTick))}" data-ts="${esc(b.lastTick)}">${relTime(b.lastTick)}</time></td>`;
+          case "lastTrade": return `<td class="num"><time class="ago" datetime="${esc(b.lastTrade)}" title="${esc(absTime(b.lastTrade))}" data-ts="${esc(b.lastTrade)}">${relTime(b.lastTrade)}</time></td>`;
         }
         return "<td></td>";
       }
@@ -496,8 +481,8 @@
           const txt = key === "pnl" ? pnlStr(b.pnl) : key === "trades" ? String(b.trades ?? 0) : usd(b[key]);
           if (td && td.textContent !== txt) { td.textContent = txt; changed = true; if (key === "pnl") td.className = `num pnl ${sign(b.pnl)}`; }
         }
-        // tick time + dot freshness
-        const time = row.querySelector("time"); if (time) { time.dataset.ts = b.lastTick || ""; time.setAttribute("title", absTime(b.lastTick)); time.textContent = relTime(b.lastTick); }
+        // last-trade time (column) + dot freshness (driven by lastTick = liveness)
+        const time = row.querySelector("time"); if (time) { time.dataset.ts = b.lastTrade || ""; time.setAttribute("title", absTime(b.lastTrade)); time.textContent = relTime(b.lastTrade); }
         const dc = dotClass(b), dotEl = row.querySelector(".dot"); if (dotEl && !dotEl.classList.contains(dc)) dotEl.className = `dot ${dc}`;
         // strategies/markets (rarely change)
         set("td.l[data-skip]", null);
@@ -516,7 +501,7 @@
               `<div class="dr-id"><span class="nm">${esc(b.bot)}</span>` +
                 `<span class="chip">${b.enabled === false ? "disabled" : dotClass(b) === "alive" ? "alive" : "idle"}</span>` +
                 (b.tags || []).map((t) => `<span class="chip">${esc(t)}</span>`).join("") +
-                `<span class="dr-money">Bal <b>${usd(b.balance)}</b> · Eq <b>${usd(b.equity)}</b></span>` +
+                `<span class="dr-money">Bal <b>${usd(b.balance)}</b> · Eq <b>${usd(b.equity)}</b> · Tick <b>${relTime(b.lastTick)}</b></span>` +
               `</div>` +
               `<div class="dr-h">Equity (${currentRange})</div>` +
               `<div class="spark" data-spark="${esc(b.bot)}"><canvas></canvas></div>` +
@@ -592,14 +577,7 @@
 
       // ── chart ────────────────────────────────────────────────────────────
       function assignColors() { DATA.bots.map((b) => b.bot).sort().forEach((id, i) => { if (!COLOR[id]) COLOR[id] = LINE_COLORS[i % LINE_COLORS.length]; }); }
-      function withGaps(pts) { const out = []; for (let i = 0; i < pts.length; i++) { if (i && pts[i].x - pts[i - 1].x > 5 * 60000) out.push({ x: (pts[i].x + pts[i - 1].x) / 2, y: null }); out.push(pts[i]); } return out; }
-      function buildDatasets() {
-        return DATA.bots.filter((b) => botMatches(b) && (b.series || []).length >= 2).map((b) => ({
-          botId: b.bot, label: b.bot,
-          data: withGaps(b.series.map((p) => ({ x: Date.parse(p.ts), y: chartMode === "pnl" ? (p.equity - b.series[0].equity) / 1e6 : p.equity / 1e6 }))),
-          borderColor: COLOR[b.bot], backgroundColor: COLOR[b.bot], borderWidth: 1.5, pointRadius: 0, pointHoverRadius: 4, tension: 0.15, spanGaps: false,
-        }));
-      }
+      const buildDatasets = () => DL.buildDatasets(DATA.bots, F, chartMode, COLOR);
       const zeroLinePlugin = { id: "zeroLine", beforeDatasetsDraw(c) { if (chartMode !== "pnl") return; const y = c.scales.y.getPixelForValue(0), { left, right } = c.chartArea, x = c.ctx; x.save(); x.strokeStyle = "#2a3142"; x.lineWidth = 1; x.setLineDash([3, 3]); x.beginPath(); x.moveTo(left, y); x.lineTo(right, y); x.stroke(); x.restore(); } };
       function mountChart() {
         const ds = buildDatasets();
@@ -627,6 +605,9 @@
         applyIsolation(); renderLegend();
       }
       function applyIsolation() {
+        if (live) live.setIsolation(isoBot);
+        const leg = document.getElementById("chart-legend"); leg.classList.toggle("has-iso", isoBot !== null);
+        leg.querySelectorAll(".leg").forEach((el) => el.setAttribute("aria-pressed", String(el.dataset.bot === isoBot)));
         if (!chart) return;
         chart.data.datasets.forEach((d) => {
           if (isoBot === null) { d.borderColor = COLOR[d.botId]; d.borderWidth = 1.5; d.pointHoverRadius = 4; }
@@ -634,9 +615,6 @@
           else { d.borderColor = dim(COLOR[d.botId], 0.12); d.borderWidth = 1; d.pointHoverRadius = 0; }
         });
         chart.update("none");
-        const leg = document.getElementById("chart-legend"); leg.classList.toggle("has-iso", isoBot !== null);
-        leg.querySelectorAll(".leg").forEach((el) => el.setAttribute("aria-pressed", String(el.dataset.bot === isoBot)));
-        document.querySelectorAll(".bot-row").forEach((r) => { /* row highlight handled by aria-expanded */ });
       }
       function renderLegend() {
         const leg = document.getElementById("chart-legend");
@@ -644,6 +622,37 @@
         leg.innerHTML = list.map((b) => `<button class="leg" data-bot="${esc(b.bot)}" aria-pressed="${b.bot === isoBot}"><span class="sw" style="background:${COLOR[b.bot]}"></span><span class="nm">${esc(b.bot)}</span><span class="pv ${sign(b.pnl)}">${pnlStr(b.pnl)}</span></button>`).join("");
         const summ = document.getElementById("chart-summary");
         if (list.length) { const best = list[0], worst = list[list.length - 1]; summ.textContent = `${list.length} bots shown. Best ${best.bot} ${pnlStr(best.pnl)}. Worst ${worst.bot} ${pnlStr(worst.pnl)}.`; }
+      }
+
+      // ── live chart (vanilla scrolling stream — liveline-style) ───────────
+      const liveVal = (b) => (chartMode === "pnl" ? (b.pnl ?? 0) / 1e6 : (b.equity ?? 0) / 1e6);
+      function visibleSeries() { return filteredSorted().filter((b) => (b.series || []).length >= 1); }
+      function ensureLive() { if (!live) live = new LiveChart(document.getElementById("livechart"), { mode: chartMode, windowMs: 120000 }); }
+      function seedLive() {
+        const list = visibleSeries();
+        live.setSeries(list.map((b) => ({ id: b.bot, color: COLOR[b.bot], label: b.bot })));
+        for (const b of list) {
+          const base = b.series[0]?.equity ?? 0;
+          live.seed(b.bot, b.series.map((p) => ({ t: Date.parse(p.ts), v: chartMode === "pnl" ? (p.equity - base) / 1e6 : p.equity / 1e6 })));
+        }
+        live.setIsolation(isoBot);
+      }
+      function feedLive() {
+        if (!live) return;
+        const list = visibleSeries();
+        live.setSeries(list.map((b) => ({ id: b.bot, color: COLOR[b.bot], label: b.bot })));
+        live.setIsolation(isoBot);
+        for (const b of list) live.setValue(b.bot, liveVal(b));
+      }
+      function setChartView(v) {
+        chartView = v;
+        const hist = v === "history";
+        document.querySelectorAll("#chart-view button").forEach((x) => x.setAttribute("aria-selected", String(x.dataset.view === v)));
+        document.getElementById("chart").hidden = !hist;
+        document.getElementById("livechart").hidden = hist;
+        document.getElementById("chart-range").style.display = hist ? "" : "none";
+        if (hist) { if (live) live.stop(); updateChart(); }
+        else { document.getElementById("chart-empty").hidden = true; ensureLive(); live.setMode(chartMode); seedLive(); feedLive(); live.start(); renderLegend(); applyIsolation(); }
       }
 
       // ── activity + reference (lazy) ──────────────────────────────────────
@@ -669,12 +678,7 @@
       function recomputePill() {
         const pill = document.getElementById("pill");
         const dataAge = DATA && DATA.asOf ? Date.now() - Date.parse(DATA.asOf) : Infinity;
-        let level;
-        // "live" = fresh data flowing + both read endpoints up. Latency is shown in the
-        // tooltip but doesn't gate green (the /api/status gateway hop can be slow).
-        if (statsOk && statusOk && dataAge < 30000) level = "green";
-        else if (!statsOk || dataAge > 180000) level = "red";
-        else level = "yellow";
+        const level = DL.recomputePillLevel(statsOk, statusOk, dataAge);
         pill.dataset.level = level;
         pill.querySelector(".pill-label").textContent = { green: "live", yellow: "degraded", red: "down" }[level];
         if (level !== prevLevel) { document.getElementById("live").textContent = "Status: " + pill.querySelector(".pill-label").textContent; prevLevel = level; }
@@ -720,7 +724,8 @@
         const sub = list.reduce((a, b) => ({ pnl: a.pnl + (b.pnl ?? 0), volume: a.volume + b.volume }), { pnl: 0, volume: 0 });
         document.getElementById("f-count").textContent = `showing ${list.length} of ${DATA.bots.length} · PnL ${pnlStr(sub.pnl)} · vol ${usd(sub.volume)}`;
         // chart + activity
-        updateChart();
+        if (chartView === "history") updateChart();
+        else { feedLive(); renderLegend(); applyIsolation(); }
         if (document.getElementById("activity").open) renderActivity();
         // timeframe option availability
         updateRangeOptions();
@@ -782,8 +787,10 @@
         document.getElementById("f-scope").addEventListener("click", (e) => { const b = e.target.closest("button"); if (!b) return; F.scope = b.dataset.scope; document.querySelectorAll("#f-scope button").forEach((x) => x.setAttribute("aria-checked", String(x === b))); applyFilters(); });
         ["f-strategy", "f-tag", "f-market"].forEach((id) => document.getElementById(id).addEventListener("change", (e) => { F[id.slice(2)] = e.target.value; applyFilters(); }));
         document.getElementById("f-clear").addEventListener("click", () => { F.scope = "active"; F.strategy = F.tag = F.market = "all"; document.querySelectorAll("#f-scope button").forEach((x) => x.setAttribute("aria-checked", String(x.dataset.scope === "active"))); ["f-strategy", "f-tag", "f-market"].forEach((id) => (document.getElementById(id).value = "all")); applyFilters(); });
-        // chart mode
-        document.getElementById("chart-mode").addEventListener("click", (e) => { const b = e.target.closest("button"); if (!b) return; chartMode = b.dataset.mode; document.querySelectorAll("#chart-mode button").forEach((x) => x.setAttribute("aria-selected", String(x === b))); document.getElementById("chart").setAttribute("aria-label", (chartMode === "pnl" ? "P&L since start" : "Equity") + " per bot"); if (chart) { chart.destroy(); chart = null; } updateChart(); });
+        // chart view (Live | History)
+        document.getElementById("chart-view").addEventListener("click", (e) => { const b = e.target.closest("button"); if (!b) return; setChartView(b.dataset.view); });
+        // chart mode (P&L | Equity) — applies to both views
+        document.getElementById("chart-mode").addEventListener("click", (e) => { const b = e.target.closest("button"); if (!b) return; chartMode = b.dataset.mode; document.querySelectorAll("#chart-mode button").forEach((x) => x.setAttribute("aria-selected", String(x === b))); document.getElementById("chart").setAttribute("aria-label", (chartMode === "pnl" ? "P&L since start" : "Equity") + " per bot"); if (live) live.setMode(chartMode); if (chartView === "live") { seedLive(); feedLive(); } else { if (chart) { chart.destroy(); chart = null; } updateChart(); } });
         // chart range (timeframe)
         document.getElementById("chart-range").addEventListener("click", (e) => { const b = e.target.closest("button"); if (!b || b.hidden) return; currentRange = b.dataset.range; document.querySelectorAll("#chart-range button").forEach((x) => x.setAttribute("aria-selected", String(x === b))); pollStats(); });
         // legend isolate
