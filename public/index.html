@@ -341,8 +341,10 @@
       const sign = (n) => (n == null ? "" : n > 0 ? "pos" : n < 0 ? "neg" : "");
       const relTime = (t) => { if (!t) return "—"; const s = (Date.now() - Date.parse(t)) / 1000; if (s < 0) return "just now"; if (s < 10) return "just now"; if (s < 60) return Math.floor(s) + "s ago"; if (s < 3600) return Math.floor(s / 60) + "m ago"; if (s < 86400) return Math.floor(s / 3600) + "h ago"; return Math.floor(s / 86400) + "d ago"; };
       const absTime = (t) => (t ? new Date(t).toLocaleString() : "");
-      const dotClass = (b) => (b.enabled === false ? "off" : b.lastTick && Date.now() - Date.parse(b.lastTick) < 10000 ? "alive" : "stale");
-      const dotWord = (c) => ({ off: "Disabled", alive: "Alive", stale: "Stale" }[c] || "");
+      // Only registry-enabled bots can be alive/stale; legacy (main, enabled=null) and
+      // disabled bots get a hollow "off" dot — they aren't part of the running fleet.
+      const dotClass = (b) => (b.enabled !== true ? "off" : b.lastTick && Date.now() - Date.parse(b.lastTick) < 10000 ? "alive" : "stale");
+      const dotWord = (c) => ({ off: "Inactive", alive: "Alive", stale: "Stale" }[c] || "");
       const dim = (hex, a) => hex + Math.round(a * 255).toString(16).padStart(2, "0");
       const side = (s) => s === "Buy" ? '<span class="side"><span class="glyph">▲</span> Buy</span>' : '<span class="side"><span class="glyph">▼</span> Sell</span>';
       const num = (v) => (v == null ? 0 : Number(v));
@@ -437,7 +439,7 @@
         el.innerHTML = `<option value="all">all ${esc(label)}</option>` + values.map((v) => `<option value="${esc(String(v))}">${esc(fmt ? fmt(v) : String(v))}</option>`).join("");
         if ([...el.options].some((o) => o.value === cur)) el.value = cur;
       }
-      function scopeBots() { return DATA.bots.filter((b) => !(F.scope === "active" && b.enabled === false)); }
+      function scopeBots() { return DATA.bots.filter((b) => !(F.scope === "active" && b.enabled !== true)); }
       function refreshFilterOptions() {
         const inScope = scopeBots();
         fillSelect("f-strategy", [...new Set(inScope.flatMap((b) => b.strategies || []))].sort(), "strategies");
@@ -445,7 +447,7 @@
         fillSelect("f-market", [...new Set(inScope.flatMap((b) => (b.markets === "all" ? [] : b.markets || [])))].sort((a, b) => a - b), "markets", mkt);
       }
       function botMatches(b) {
-        if (F.scope === "active" && b.enabled === false) return false;
+        if (F.scope === "active" && b.enabled !== true) return false;
         if (F.strategy !== "all" && !(b.strategies || []).includes(F.strategy)) return false;
         if (F.tag !== "all" && !(b.tags || []).includes(F.tag)) return false;
         if (F.market !== "all" && b.markets !== "all" && !(b.markets || []).map(String).includes(F.market)) return false;
@@ -679,7 +681,7 @@
       }
       function renderPillTip() {
         const tip = document.getElementById("pill-tip");
-        const alive = DATA ? DATA.bots.filter((b) => b.enabled !== false && b.lastTick && Date.now() - Date.parse(b.lastTick) < 10000).length : 0;
+        const alive = DATA ? DATA.bots.filter((b) => b.enabled === true && b.lastTick && Date.now() - Date.parse(b.lastTick) < 10000).length : 0;
         const active = DATA ? DATA.aggregate.activeBots : 0;
         const lastTick = DATA ? DATA.bots.reduce((m, b) => (b.lastTick && (!m || b.lastTick > m) ? b.lastTick : m), null) : null;
         const rows = [
@@ -722,7 +724,7 @@
         updateRangeOptions();
         document.getElementById("kpis").setAttribute("aria-busy", "false");
         // a11y live summary
-        const alive = DATA.bots.filter((b) => b.enabled !== false && b.lastTick && Date.now() - Date.parse(b.lastTick) < 10000).length;
+        const alive = DATA.bots.filter((b) => b.enabled === true && b.lastTick && Date.now() - Date.parse(b.lastTick) < 10000).length;
         document.getElementById("live").textContent = `Updated ${relTime(DATA.asOf)}. Fleet PnL ${pnlStr(DATA.aggregate.pnl)}, ${alive} of ${DATA.aggregate.activeBots} bots alive.`;
         firstData = false;
       }

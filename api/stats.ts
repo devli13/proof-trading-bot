@@ -186,7 +186,7 @@ export default async function handler(
 
     const aggregate = {
       bots: bots.length,
-      activeBots: bots.filter((b) => b.enabled !== false).length,
+      activeBots: bots.filter((b) => b.enabled === true).length,
       pnl: bots.reduce((a, b) => a + (b.pnl ?? 0), 0),
       equity: bots.reduce((a, b) => a + (b.equity ?? 0), 0),
       volume: bots.reduce((a, b) => a + b.volume, 0),
