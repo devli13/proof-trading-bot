@@ -8,7 +8,7 @@ import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
 import type { BotsTableProps } from "./contracts";
 import type { BotStat, Range } from "@/lib/types";
 import { dotClass, dotWord, mkt, pnlStr, relTime, sign, usd } from "@/lib/dashboard-lib";
-import { drawerVariants } from "@/lib/motion";
+import { drawerVariants, layoutSpring } from "@/lib/motion";
 import { BotDrawer } from "./bot-drawer";
 import { Sparkline } from "./sparkline";
 
@@ -139,7 +139,13 @@ function BotGroup({
   const drawerId = `d-${bot.bot}`;
 
   return (
-    <tbody className="bot-group" data-bot={bot.bot}>
+    <motion.tbody
+      className="bot-group"
+      data-bot={bot.bot}
+      layout={reduce ? false : "position"}
+      transition={layoutSpring}
+      style={{ position: "relative" }}
+    >
       <tr
         className="bot-row"
         role="button"
@@ -179,7 +185,7 @@ function BotGroup({
           </div>
         </td>
       </tr>
-    </tbody>
+    </motion.tbody>
   );
 }
 

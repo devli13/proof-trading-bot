@@ -1,5 +1,6 @@
 "use client";
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
+import { LayoutGroup } from "framer-motion";
 import { useFleet } from "@/lib/use-fleet";
 import { filteredSorted, relTime, pnlStr } from "@/lib/dashboard-lib";
 import { assignColors } from "@/lib/colors";
@@ -33,7 +34,24 @@ export function Dashboard({ initial }: { initial: StatsResponse | null }) {
   const [jsonOpen, setJsonOpen] = useState(false);
 
   const colors = useMemo(() => assignColors(bots.map((b) => b.bot)), [bots]);
-  const visible = useMemo(() => filteredSorted(bots, filter, sortKey, sortDir), [bots, filter, sortKey, sortDir]);
+
+  // Filtered + sorted, BUT the row order is FROZEN while any drawer is open — so reading
+  // an expanded bot isn't disrupted by the fleet constantly re-sorting under it. New data
+  // still flows into each row; only the ordering holds. When everything collapses it
+  // re-sorts (and the rows glide via framer-motion layout in <BotsTable/>).
+  const orderRef = useRef<string[]>([]);
+  const visible = useMemo(() => {
+    const sorted = filteredSorted(bots, filter, sortKey, sortDir);
+    if (expanded.size === 0) {
+      orderRef.current = sorted.map((b) => b.bot);
+      return sorted;
+    }
+    const byId = new Map(sorted.map((b) => [b.bot, b]));
+    const held = orderRef.current.map((id) => byId.get(id)).filter((b): b is (typeof sorted)[number] => b != null);
+    const heldIds = new Set(orderRef.current);
+    const fresh = sorted.filter((b) => !heldIds.has(b.bot)); // bots that newly appeared
+    return [...held, ...fresh];
+  }, [bots, filter, sortKey, sortDir, expanded]);
 
   const { strategies, tags, markets } = useMemo(() => {
     const s = new Set<string>();
@@ -102,18 +120,20 @@ export function Dashboard({ initial }: { initial: StatsResponse | null }) {
       />
       <Insights bots={visible} colors={colors} />
       <Filters filter={filter} onChange={setFilter} strategies={strategies} tags={tags} markets={markets} count={count} />
-      <BotsTable
-        bots={visible}
-        colors={colors}
-        now={fleet.now}
-        sortKey={sortKey}
-        sortDir={sortDir}
-        onSort={onSort}
-        expanded={expanded}
-        onToggle={onToggle}
-        strategyLogic={data?.strategyLogic ?? {}}
-        range={fleet.range}
-      />
+      <LayoutGroup>
+        <BotsTable
+          bots={visible}
+          colors={colors}
+          now={fleet.now}
+          sortKey={sortKey}
+          sortDir={sortDir}
+          onSort={onSort}
+          expanded={expanded}
+          onToggle={onToggle}
+          strategyLogic={data?.strategyLogic ?? {}}
+          range={fleet.range}
+        />
+      </LayoutGroup>
       <Activity decisions={data?.decisions ?? []} recentOrders={data?.recentOrders ?? []} now={fleet.now} />
       <StrategyReference strategyLogic={data?.strategyLogic ?? {}} bots={bots} />
       <JsonModal open={jsonOpen} onClose={() => setJsonOpen(false)} data={data} />

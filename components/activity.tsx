@@ -4,10 +4,22 @@ import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
 import type { ActivityProps } from "./contracts";
 import type { ChangeRow } from "@/lib/types";
 import { mkt, num, relTime, usd } from "@/lib/dashboard-lib";
-import { enter } from "@/lib/motion";
+import { enter, EASE_OUT } from "@/lib/motion";
 import { fetchChangelog } from "@/lib/api";
 
 type Tab = "orders" | "decisions" | "changes";
+
+// New feed rows fade in with a brief accent highlight, then fade out as they scroll off
+// — so constantly-arriving orders/decisions are introduced smoothly, not snapped in.
+const rowMotion = (reduce: boolean) =>
+  reduce
+    ? {}
+    : {
+        initial: { opacity: 0, backgroundColor: "rgba(122,162,255,0.16)" },
+        animate: { opacity: 1, backgroundColor: "rgba(122,162,255,0)" },
+        exit: { opacity: 0 },
+        transition: { duration: 0.5, ease: EASE_OUT },
+      };
 
 /**
  * Collapsible activity feed mirroring the vanilla dashboard's <details id="activity">.
@@ -125,30 +137,35 @@ export function Activity({ decisions, recentOrders, now }: ActivityProps) {
                   </tr>
                 </thead>
                 <tbody>
-                  {orders.length ? (
-                    orders.map((o, i) => (
-                      <tr key={`${o.bot ?? ""}-${o.ts}-${i}`}>
-                        <td className="l muted">{relTime(o.ts, now)}</td>
-                        <td className="l">{o.bot ?? "—"}</td>
-                        <td className="l">
-                          <span className="chip chip-strat">{o.strategy}</span>
+                  <AnimatePresence initial={false}>
+                    {orders.length ? (
+                      orders.map((o) => (
+                        <motion.tr
+                          key={`${o.bot ?? ""}-${o.ts}-${o.side}-${o.price}-${o.quantity}`}
+                          {...rowMotion(reduce)}
+                        >
+                          <td className="l muted">{relTime(o.ts, now)}</td>
+                          <td className="l">{o.bot ?? "—"}</td>
+                          <td className="l">
+                            <span className="chip chip-strat">{o.strategy}</span>
+                          </td>
+                          <td className="l">{mkt(o.market)}</td>
+                          <td className="l">
+                            <Side side={o.side} />
+                          </td>
+                          <td>{usd(num(o.price))}</td>
+                          <td>{o.quantity}</td>
+                          <td className="muted">{o.check_tx_code ?? ""}</td>
+                        </motion.tr>
+                      ))
+                    ) : (
+                      <tr>
+                        <td className="l empty" colSpan={8}>
+                          no orders
                         </td>
-                        <td className="l">{mkt(o.market)}</td>
-                        <td className="l">
-                          <Side side={o.side} />
-                        </td>
-                        <td>{usd(num(o.price))}</td>
-                        <td>{o.quantity}</td>
-                        <td className="muted">{o.check_tx_code ?? ""}</td>
                       </tr>
-                    ))
-                  ) : (
-                    <tr>
-                      <td className="l empty" colSpan={8}>
-                        no orders
-                      </td>
-                    </tr>
-                  )}
+                    )}
+                  </AnimatePresence>
                 </tbody>
               </table>
             </div>
@@ -172,25 +189,27 @@ export function Activity({ decisions, recentOrders, now }: ActivityProps) {
                   </tr>
                 </thead>
                 <tbody>
-                  {decs.length ? (
-                    decs.map((d, i) => (
-                      <tr key={`${d.bot ?? ""}-${d.strategy}-${d.action}-${i}`}>
-                        <td className="l">{d.bot ?? "—"}</td>
-                        <td className="l muted">{d.strategy}</td>
-                        <td className="l">
-                          <span className="chip chip-action">{d.action}</span>
+                  <AnimatePresence initial={false}>
+                    {decs.length ? (
+                      decs.map((d) => (
+                        <motion.tr key={`${d.bot ?? ""}-${d.strategy}-${d.action}`} {...rowMotion(reduce)}>
+                          <td className="l">{d.bot ?? "—"}</td>
+                          <td className="l muted">{d.strategy}</td>
+                          <td className="l">
+                            <span className="chip chip-action">{d.action}</span>
+                          </td>
+                          <td>{d.c}</td>
+                          <td className="muted">{relTime(d.last, now)}</td>
+                        </motion.tr>
+                      ))
+                    ) : (
+                      <tr>
+                        <td className="l empty" colSpan={5}>
+                          no decisions
                         </td>
-                        <td>{d.c}</td>
-                        <td className="muted">{relTime(d.last, now)}</td>
                       </tr>
-                    ))
-                  ) : (
-                    <tr>
-                      <td className="l empty" colSpan={5}>
-                        no decisions
-                      </td>
-                    </tr>
-                  )}
+                    )}
+                  </AnimatePresence>
                 </tbody>
               </table>
             </div>
