@@ -357,6 +357,7 @@
       const expanded = new Set();
       let sortKey = "pnl", sortDir = -1;
       let statsTimer = null, statusTimer = null, inflightStats = null, progT = null;
+      let streamConnected = false; // Supabase Realtime websocket up?
       const groups = {}; // bot id -> <tbody>
       const RM = matchMedia("(prefers-reduced-motion:reduce)"); window.__RM = RM.matches; RM.onchange = () => (window.__RM = RM.matches);
       const LINE_COLORS = ["#7aa2ff", "#c792ea", "#4dd0e1", "#ffd166", "#a3e635", "#f78fb3", "#60a5fa", "#34d399", "#e0a3ff", "#5eead4", "#fbbf24", "#93c5fd"];
@@ -689,6 +690,7 @@
           ["Chain height", STATUS && STATUS.height != null ? esc(STATUS.height) : "—"],
           ["API latency", lastLatency != null ? lastLatency + " ms" : "—"],
           ["Data fresh", DATA ? relTime(DATA.asOf) : "—"],
+          ["Stream", streamConnected ? "● websocket" : "polling"],
           ["Bots alive", `${alive} / ${active}`],
           ["Last tick", relTime(lastTick)],
         ];
@@ -757,7 +759,9 @@
       }
       // Always fetch on call (so a background tab still loads initial data); only the
       // RECURRING poll pauses when hidden, and resumes on visibilitychange.
-      async function loopStats() { try { progStart(); await pollStats(); } finally { progDone(); if (!document.hidden) statsTimer = setTimeout(loopStats, 5000); } }
+      // When the realtime stream is up it drives refetches; polling drops to a slow
+      // safety-net heartbeat. If the stream drops, polling speeds back up to 5s.
+      async function loopStats() { try { progStart(); await pollStats(); } finally { progDone(); if (!document.hidden) statsTimer = setTimeout(loopStats, streamConnected ? 20000 : 5000); } }
       async function loopStatus() { try { await pollStatus(); } finally { if (!document.hidden) statusTimer = setTimeout(loopStatus, 10000); } }
 
       // ── listeners ────────────────────────────────────────────────────────
@@ -801,6 +805,14 @@
       function closeModal() { const m = document.getElementById("json-modal"); m.hidden = true; m.setAttribute("aria-hidden", "true"); document.body.style.overflow = ""; document.removeEventListener("keydown", modalKey); if (lastFocus) lastFocus.focus(); }
       function modalKey(e) { if (e.key === "Escape") closeModal(); if (e.key === "Tab") { const f = [document.getElementById("jm-copy"), document.getElementById("jm-close")]; const i = f.indexOf(document.activeElement); e.preventDefault(); f[(i + (e.shiftKey ? -1 : 1) + f.length) % f.length].focus(); } }
 
+      // ── realtime bridge (the module script below drives this) ────────────
+      function debounce(fn, ms) { let t; return () => { clearTimeout(t); t = setTimeout(fn, ms); }; }
+      const realtimeRefetch = debounce(() => { if (!document.hidden) pollStats(); }, 1200);
+      window.__rt = {
+        ping: () => realtimeRefetch(),                       // a DB-change broadcast arrived
+        status: (ok) => { if (ok !== streamConnected) { streamConnected = ok; recomputePill(); } },
+      };
+
       // ── boot ─────────────────────────────────────────────────────────────
       mount();
       setInterval(tickRelTimes, 15000);
@@ -815,6 +827,23 @@
       }
       window.__slotText = slotText;
       window.dispatchEvent(new Event("slot-ready"));
+
+      // Supabase Realtime — stream DB-change broadcasts instead of polling. The anon
+      // key is PUBLIC by design; security is enforced by RLS (anon can only SELECT the
+      // 3 non-sensitive tables — never the bot keys). A DB trigger broadcasts on each
+      // new snapshot; we debounce-refetch /api/stats. Falls back to polling if down.
+      try {
+        const { createClient } = await import("https://esm.sh/@supabase/supabase-js@2");
+        const sb = createClient(
+          "https://cdgnttmzcsppqodpzioz.supabase.co",
+          "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImNkZ250dG16Y3NwcHFvZHB6aW96Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODAwMDQzNjUsImV4cCI6MjA5NTU4MDM2NX0.O6wmSExQ3y3PMVvnHlFd11BAStZFGEGOxuLJo8k0nEo",
+        );
+        sb.channel("proof_bot_fleet")
+          .on("broadcast", { event: "change" }, () => window.__rt && window.__rt.ping())
+          .subscribe((status) => window.__rt && window.__rt.status(status === "SUBSCRIBED"));
+      } catch (e) {
+        /* realtime unavailable → polling continues */
+      }
     </script>
   </body>
 </html>

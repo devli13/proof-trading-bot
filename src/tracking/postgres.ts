@@ -64,6 +64,53 @@ create table if not exists ${schema}.bots (
   enabled boolean not null default true,
   created_at timestamptz not null default now()
 );
+
+-- ── Realtime streaming + RLS (Supabase). anon may READ the 3 non-sensitive tables
+-- (for the public dashboard); the bots table (private_key_enc) is NEVER granted to
+-- anon. A trigger broadcasts a lightweight signal on each new snapshot so the
+-- dashboard streams over WebSocket instead of polling. Idempotent + guarded so it's
+-- a no-op on a plain (non-Supabase) Postgres that lacks the anon role / realtime.
+do $$
+declare s text := '${schema}';
+begin
+  if exists (select 1 from pg_roles where rolname = 'anon') then
+    execute format('alter table %I.bot_snapshots enable row level security', s);
+    execute format('alter table %I.bot_orders enable row level security', s);
+    execute format('alter table %I.bot_decisions enable row level security', s);
+    execute format('alter table %I.bots enable row level security', s);
+    execute format('grant usage on schema %I to anon', s);
+    execute format('grant select on %I.bot_snapshots to anon', s);
+    execute format('grant select on %I.bot_orders to anon', s);
+    execute format('grant select on %I.bot_decisions to anon', s);
+    execute format('revoke all on %I.bots from anon', s); -- keys: anon gets nothing
+    execute format('drop policy if exists anon_read on %I.bot_snapshots', s);
+    execute format('create policy anon_read on %I.bot_snapshots for select to anon using (true)', s);
+    execute format('drop policy if exists anon_read on %I.bot_orders', s);
+    execute format('create policy anon_read on %I.bot_orders for select to anon using (true)', s);
+    execute format('drop policy if exists anon_read on %I.bot_decisions', s);
+    execute format('create policy anon_read on %I.bot_decisions for select to anon using (true)', s);
+  end if;
+  if exists (select 1 from pg_publication where pubname = 'supabase_realtime') then
+    if not exists (select 1 from pg_publication_tables where pubname='supabase_realtime' and schemaname=s and tablename='bot_snapshots') then
+      execute format('alter publication supabase_realtime add table %I.bot_snapshots', s); end if;
+    if not exists (select 1 from pg_publication_tables where pubname='supabase_realtime' and schemaname=s and tablename='bot_orders') then
+      execute format('alter publication supabase_realtime add table %I.bot_orders', s); end if;
+    if not exists (select 1 from pg_publication_tables where pubname='supabase_realtime' and schemaname=s and tablename='bot_decisions') then
+      execute format('alter publication supabase_realtime add table %I.bot_decisions', s); end if;
+  end if;
+end $$;
+
+create or replace function ${schema}.notify_realtime() returns trigger
+language plpgsql security definer as $body$
+begin
+  perform realtime.send(jsonb_build_object('src', tg_table_name), 'change', 'proof_bot_fleet', false);
+  return null;
+exception when undefined_function then
+  return null; -- non-Supabase Postgres: no realtime.send, no-op
+end $body$;
+drop trigger if exists trg_notify_snapshots on ${schema}.bot_snapshots;
+create trigger trg_notify_snapshots after insert on ${schema}.bot_snapshots
+  for each statement execute function ${schema}.notify_realtime();
 `;
 }
 
