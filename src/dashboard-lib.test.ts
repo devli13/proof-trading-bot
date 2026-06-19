@@ -13,7 +13,7 @@ import {
   filteredSorted,
   buildDatasets,
   recomputePillLevel,
-} from "../public/dashboard-lib.js";
+} from "../lib/dashboard-lib.js";
 
 describe("formatting helpers", () => {
   it("usd / pnlStr format micro-USDC with sign discipline", () => {
@@ -87,7 +87,7 @@ describe("botMatches", () => {
 });
 
 describe("filteredSorted", () => {
-  const F = { scope: "all", strategy: "all", tag: "all", market: "all" };
+  const F = { scope: "all", strategy: "all", tag: "all", market: "all" } as const;
   const bots = [
     { bot: "a", enabled: true, pnl: 10 },
     { bot: "b", enabled: true, pnl: 30 },
@@ -101,7 +101,7 @@ describe("filteredSorted", () => {
 });
 
 describe("buildDatasets", () => {
-  const F = { scope: "all", strategy: "all", tag: "all", market: "all" };
+  const F = { scope: "all", strategy: "all", tag: "all", market: "all" } as const;
   const COLOR = { a: "#111111" };
   const bots = [
     { bot: "a", enabled: true, series: [{ ts: "2026-06-19T00:00:00Z", equity: 1000000 }, { ts: "2026-06-19T00:01:00Z", equity: 1500000 }] },
@@ -110,14 +110,14 @@ describe("buildDatasets", () => {
   it("excludes bots with <2 points; PnL normalizes to first point", () => {
     const ds = buildDatasets(bots, F, "pnl", COLOR);
     expect(ds).toHaveLength(1);
-    expect(ds[0].botId).toBe("a");
-    expect(ds[0].data[0].y).toBe(0); // first point baseline
-    expect(ds[0].data[1].y).toBeCloseTo(0.5); // (1.5 - 1.0)
-    expect(ds[0].borderColor).toBe("#111111");
+    expect(ds[0]!.botId).toBe("a");
+    expect(ds[0]!.data[0]!.y).toBe(0); // first point baseline
+    expect(ds[0]!.data[1]!.y).toBeCloseTo(0.5); // (1.5 - 1.0)
+    expect(ds[0]!.borderColor).toBe("#111111");
   });
   it("equity mode uses absolute equity", () => {
     const ds = buildDatasets(bots, F, "equity", COLOR);
-    expect(ds[0].data[1].y).toBeCloseTo(1.5);
+    expect(ds[0]!.data[1]!.y).toBeCloseTo(1.5);
   });
 });
 

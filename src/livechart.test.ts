@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { lerp, niceRange } from "../public/livechart.js";
+import { lerp, niceRange } from "../lib/livechart-math.js";
 
 describe("lerp", () => {
   it("interpolates", () => {

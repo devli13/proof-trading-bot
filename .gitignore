@@ -26,3 +26,6 @@ bots.json
 supabase/
 .branches/
 .temp/
+/.next
+next-env.d.ts
+*.tsbuildinfo
