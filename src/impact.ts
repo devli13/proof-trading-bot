@@ -1,5 +1,5 @@
 import { decode } from "@msgpack/msgpack";
-import type { ExchangeClient } from "@proof/trading-sdk";
+import type { ExchangeClient, MarketConfig } from "@proof/trading-sdk";
 
 /**
  * Impact-market data layer + parity math.
@@ -29,6 +29,37 @@ export interface EventLegs {
   status: string; // "Trading" | "PreResolution" | "Resolved" | ...
 }
 
+/** The msgpack status field is "Trading" (string) when live, but an object like
+ *  {PreResolution:[…]} / {Resolved:[…]} otherwise — which String()'d to "[object Object]".
+ *  Normalize to the variant name so logs/UI read "PreResolution"/"Resolved". */
+export function normalizeStatus(v: unknown): string {
+  if (typeof v === "string") return v;
+  if (v && typeof v === "object") {
+    const k = Object.keys(v as Record<string, unknown>)[0];
+    if (k) return k;
+  }
+  return "Unknown";
+}
+
+/**
+ * Distinct impact-event IDs present in the full market list — the event id is the
+ * first element of a market's `ConditionalPerp`/`PredictionBinary` kind tuple. Lets
+ * the worker DISCOVER every event Proof has spun up (so bots can trade new markets
+ * as they launch) without a dedicated SDK list endpoint (there isn't one).
+ */
+export function discoverImpactEventIds(markets: MarketConfig[]): number[] {
+  const ids = new Set<number>();
+  for (const m of markets) {
+    const k = m.kind;
+    if (k && typeof k === "object") {
+      const tuple = ("ConditionalPerp" in k ? k.ConditionalPerp : "PredictionBinary" in k ? k.PredictionBinary : undefined);
+      const ev = tuple?.[0];
+      if (typeof ev === "number" && Number.isFinite(ev) && ev > 0) ids.add(ev);
+    }
+  }
+  return Array.from(ids).sort((a, b) => a - b);
+}
+
 export async function discoverEventLegs(
   apiUrl: string,
   impactId: number,
@@ -56,7 +87,7 @@ export async function discoverEventLegs(
     question: String(raw[6] ?? ""),
     deadlineMs: num(raw[7]),
     resolutionWindowMs: num(raw[8]),
-    status: String(raw[9] ?? "Unknown"),
+    status: normalizeStatus(raw[9]),
   };
 }
 

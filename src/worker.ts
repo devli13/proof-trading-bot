@@ -33,13 +33,16 @@ export async function runWorker(): Promise<void> {
   const tracker = await createTracker(baseConfig, logger); // shared; migrates the schema (incl. bots table)
   const registrySql = await openRegistrySql(baseConfig); // shared registry connection (reused every refresh)
   const readClient = createClient(baseConfig);
-  const marketData = new MarketData(baseConfig.gatewayUrl, readClient, baseConfig.marketCacheMs);
+  const marketData = new MarketData(baseConfig.gatewayUrl, readClient, baseConfig.marketCacheMs, baseConfig.autoDiscoverEvents);
   const engines = new Map<string, BotEngine>();
   const specHashByBot = new Map<string, string>();
+  let lastEventsLog = "";
 
-  // Fingerprint of the fields that, if changed, require recreating the engine.
-  const specHash = (s: BotSpec): string =>
-    JSON.stringify({ s: s.strategies, m: s.markets, t: s.tags, p: s.params, k: s.privateKeyHex.slice(-10) });
+  // Fingerprint of the fields that, if changed, require recreating the engine. Includes
+  // the RESOLVED events (not just spec.markets) so an "all" bot is rebuilt with the new
+  // event set when auto-discovery picks up a freshly-launched market.
+  const specHash = (s: BotSpec, unionEvents: number[]): string =>
+    JSON.stringify({ s: s.strategies, m: s.markets, t: s.tags, p: s.params, k: s.privateKeyHex.slice(-10), e: resolveEvents(s, unionEvents) });
 
   async function buildEngine(spec: BotSpec, unionEvents: number[]): Promise<BotEngine | null> {
     const cfg: Config = loadConfig({
@@ -93,16 +96,24 @@ export async function runWorker(): Promise<void> {
       usable.push(spec);
     }
 
-    // Union of explicitly-requested events; "all" bots use this union (default to the
-    // configured event when nobody lists one explicitly).
+    // Seed the explicitly-requested events (the union any bot lists by id), then refresh:
+    // with auto-discovery on, MarketData also probes every live event and reports which are
+    // Trading. "all" bots trade that live trading set, so newly-launched Proof markets are
+    // picked up automatically (no registry edit). Falls back to explicit / configured event.
     const explicit = new Set<number>();
     for (const s of usable) if (Array.isArray(s.markets)) s.markets.forEach((e) => explicit.add(e));
-    const unionEvents = explicit.size ? Array.from(explicit) : [baseConfig.impactEvent];
-    marketData.setEvents(unionEvents);
+    marketData.setEvents(explicit.size ? Array.from(explicit) : [baseConfig.impactEvent]);
     try {
       await marketData.ensureFresh();
     } catch (err) {
       logger.warn({ err: (err as Error).message }, "worker: market-data refresh failed during sync");
+    }
+    const trading = marketData.tradingEvents();
+    const unionEvents = trading.length ? trading : explicit.size ? Array.from(explicit) : [baseConfig.impactEvent];
+    const eventsKey = unionEvents.join(",");
+    if (eventsKey !== lastEventsLog) {
+      logger.info({ tradingEvents: unionEvents, discovered: baseConfig.autoDiscoverEvents }, "worker: live trading events updated");
+      lastEventsLog = eventsKey;
     }
 
     // Remove bots that were disabled / deleted / skipped (dup or bad key).
@@ -117,7 +128,7 @@ export async function runWorker(): Promise<void> {
 
     // Add new bots; RECREATE ones whose config changed (hot-update).
     for (const spec of usable) {
-      const hash = specHash(spec);
+      const hash = specHash(spec, unionEvents);
       if (engines.has(spec.id) && specHashByBot.get(spec.id) === hash) continue; // unchanged
       try {
         if (engines.has(spec.id)) {

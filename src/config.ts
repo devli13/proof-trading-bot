@@ -46,6 +46,10 @@ const EnvSchema = z.object({
 
   // ── Strategy selection / targets ─────────────────────────────────────────
   PROOF_IMPACT_EVENT: z.coerce.number().int().nonnegative().default(203),
+  /** When true (worker), discover every live (status=Trading) impact event from the
+   *  market list so `markets:"all"` bots automatically trade new markets as Proof
+   *  launches them — no redeploy/registry edit needed. */
+  AUTO_DISCOVER_EVENTS: z.preprocess(boolish, z.boolean()).default(true),
   STRATEGIES: z.string().default("market-maker,parity-arb"),
   /** Market the MM quotes. 0 = use the event's underlying perp. */
   MM_MARKET: z.coerce.number().int().nonnegative().default(0),
@@ -129,6 +133,7 @@ export interface Config {
   logLevel: "fatal" | "error" | "warn" | "info" | "debug" | "trace";
 
   impactEvent: number;
+  autoDiscoverEvents: boolean;
   strategies: string[];
   mmMarket: number;
   mmOrderQty: bigint;
@@ -214,6 +219,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     logLevel: e.LOG_LEVEL,
 
     impactEvent: e.PROOF_IMPACT_EVENT,
+    autoDiscoverEvents: e.AUTO_DISCOVER_EVENTS,
     strategies: e.STRATEGIES.split(",").map((s) => s.trim()).filter(Boolean),
     mmMarket: e.MM_MARKET,
     mmOrderQty: e.MM_ORDER_QTY,

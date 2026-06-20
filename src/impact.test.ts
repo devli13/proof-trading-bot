@@ -4,8 +4,39 @@ import {
   binaryParityResidual,
   conditionalParityResidual,
   nearResolution,
+  normalizeStatus,
+  discoverImpactEventIds,
   type EventLegs,
 } from "./impact.js";
+import type { MarketConfig } from "@proof/trading-sdk";
+
+describe("normalizeStatus", () => {
+  it("passes strings through and names object variants", () => {
+    expect(normalizeStatus("Trading")).toBe("Trading");
+    expect(normalizeStatus({ PreResolution: [1] })).toBe("PreResolution");
+    expect(normalizeStatus({ Resolved: [] })).toBe("Resolved");
+    expect(normalizeStatus(undefined)).toBe("Unknown");
+    expect(normalizeStatus(null)).toBe("Unknown");
+  });
+});
+
+describe("discoverImpactEventIds", () => {
+  const m = (market: number, kind?: MarketConfig["kind"]): MarketConfig => ({ market, kind }) as MarketConfig;
+  it("extracts distinct, sorted event ids from conditional/binary market kinds", () => {
+    const markets = [
+      m(7, "Perp"),
+      m(20302, { PredictionBinary: [203, "Yes"] }),
+      m(20300, { ConditionalPerp: [203, "Yes"] }),
+      m(20102, { PredictionBinary: [201, "No"] }),
+      m(1, "Perp"),
+      m(20303, { PredictionBinary: [203, "No"] }), // dup event 203
+    ];
+    expect(discoverImpactEventIds(markets)).toEqual([201, 203]);
+  });
+  it("ignores plain perps and malformed kinds", () => {
+    expect(discoverImpactEventIds([m(7, "Perp"), m(8, undefined)])).toEqual([]);
+  });
+});
 
 describe("impliedProbBps", () => {
   it("computes YES probability in bps", () => {
