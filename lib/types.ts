@@ -48,6 +48,26 @@ export interface FleetPoint {
   volume: number; // micro-USDC traded in the bucket
 }
 
+export interface MarketRow {
+  market: number;
+  trades: number;
+  volume: number; // micro-USDC
+  bots: number; // distinct bots trading it
+  makerPct: number | null; // 0..1 maker share
+}
+
+export interface MarketCell {
+  bot: string;
+  market: number;
+  trades: number;
+  volume: number; // micro-USDC
+}
+
+export interface MarketStats {
+  markets: MarketRow[];
+  cells: MarketCell[];
+}
+
 export interface StatsResponse {
   ok: true;
   asOf: string | null;
@@ -55,6 +75,7 @@ export interface StatsResponse {
   dataSince: string | null;
   aggregate: Aggregate;
   fleetSeries?: FleetPoint[];
+  marketStats?: MarketStats;
   bots: BotStat[];
   decisions: DecisionAgg[];
   recentOrders: OrderRow[];

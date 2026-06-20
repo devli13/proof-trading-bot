@@ -75,7 +75,7 @@ export async function GET(req: Request): Promise<Response> {
 
     // Every query below is independent → run them CONCURRENTLY (the pool makes this real
     // parallelism, so total latency ≈ the slowest query, not the sum of all nine).
-    const [registry, latest, vol, series, fleetVol, metricsRows, sinceRow, decisions, recent] = await Promise.all([
+    const [registry, latest, vol, series, fleetVol, metricsRows, sinceRow, decisions, recent, marketAgg, botMarketAgg] = await Promise.all([
       sql`select id, strategies, markets, tags, enabled from ${t("bots")} order by id`.catch(
         () => [] as Array<Record<string, unknown>>,
       ),
@@ -118,6 +118,22 @@ export async function GET(req: Request): Promise<Response> {
       sql`select bot, ts, strategy, kind, market, side, price, quantity, check_tx_code
         from ${t("bot_orders")} where (note is null or note <> 'dry-run') and strategy <> 'audit-prep'
         order by ts desc limit 60`,
+      // Per-market breakdown (windowed): volume, trades, maker share, distinct bots.
+      sql`select market,
+          count(*)::int as trades,
+          coalesce(sum((price::numeric) * (quantity::numeric) / 100), 0)::text as volume_micro,
+          count(distinct bot)::int as bots,
+          avg((kind = 'order' and strategy = 'market-maker')::int) as maker_pct
+        from ${t("bot_orders")}
+        where (note is null or note <> 'dry-run') and strategy <> 'audit-prep' ${sinceClause}
+        group by market order by sum((price::numeric) * (quantity::numeric) / 100) desc`,
+      // Bot × market cells (windowed): which bot trades which market + how much.
+      sql`select bot, market,
+          count(*)::int as trades,
+          coalesce(sum((price::numeric) * (quantity::numeric) / 100), 0)::text as volume_micro
+        from ${t("bot_orders")}
+        where (note is null or note <> 'dry-run') and strategy <> 'audit-prep' ${sinceClause}
+        group by bot, market`,
     ]);
 
     await sql.end({ timeout: 3 });
@@ -146,6 +162,21 @@ export async function GET(req: Request): Promise<Response> {
       .sort((a, b) => a - b)
       .map((k) => ({ ts: new Date(k).toISOString(), equity: eqByM.get(k) ?? null, volume: volByM.get(k) ?? 0 }));
 
+    // Per-market breakdown + the bot×market cells (which bots trade which markets, $).
+    const markets = (marketAgg as unknown as Array<{ market: number; trades: number; volume_micro: string; bots: number; maker_pct: string | null }>).map((r) => ({
+      market: Number(r.market),
+      trades: Number(r.trades),
+      volume: Number(r.volume_micro),
+      bots: Number(r.bots),
+      makerPct: r.maker_pct == null ? null : Number(r.maker_pct),
+    }));
+    const cells = (botMarketAgg as unknown as Array<{ bot: string; market: number; trades: number; volume_micro: string }>).map((r) => ({
+      bot: r.bot,
+      market: Number(r.market),
+      trades: Number(r.trades),
+      volume: Number(r.volume_micro),
+    }));
+
     return Response.json({
       ok: true,
       asOf: pickAsOf(latest as unknown as SnapshotRow[]),
@@ -153,6 +184,7 @@ export async function GET(req: Request): Promise<Response> {
       dataSince: sinceRow[0]?.since ?? null,
       aggregate: computeAggregate(bots),
       fleetSeries,
+      marketStats: { markets, cells },
       bots,
       decisions,
       recentOrders: recent,

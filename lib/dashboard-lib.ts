@@ -17,8 +17,23 @@ export interface BotLike {
 export const esc = (s: unknown): string =>
   String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c] ?? c);
 
-export const MKT: Record<number, string> = { 7: "HYPE", 20300: "HYPE-CPY", 20301: "HYPE-CPN", 20302: "HYPE-EBY", 20303: "HYPE-EBN", 203: "HYPE #203" };
-export const mkt = (m: number): string => MKT[m] ?? "m" + m;
+// Known underlying perps (small market ids). New assets fall back to "perp<id>".
+export const UNDERLYING: Record<number, string> = { 1: "BTC", 3: "SOL", 4: "WTI", 7: "HYPE", 12: "H100" };
+// Impact-event leg ids encode the event: leg = event*100 + role (0=CPY,1=CPN,2=YES,3=NO).
+const LEG_ROLE = ["CPY", "CPN", "YES", "NO"];
+
+/** Event id for an impact leg market (id ≥ 10000), else null for a plain underlying perp. */
+export const eventOf = (m: number): number | null => (m >= 10000 ? Math.floor(m / 100) : null);
+
+/**
+ * Human label for any market id — works for events Proof adds later (no hardcoding):
+ * underlying perps → asset name; event legs → "E<event>·<role>" (e.g. "E201·YES").
+ */
+export const mkt = (m: number): string => {
+  const ev = eventOf(m);
+  if (ev !== null) return `E${ev}·${LEG_ROLE[m % 100] ?? "m" + (m % 100)}`;
+  return UNDERLYING[m] ?? "perp" + m;
+};
 
 export const usd = (m: number | null | undefined): string => {
   if (m == null || isNaN(m)) return "—";
