@@ -87,6 +87,27 @@ const EnvSchema = z.object({
   VOL_STOP_BPS: z.coerce.number().int().positive().default(25), // hard loss cap per cycle
   VOL_HOLD_MS: z.coerce.number().int().positive().default(60_000), // time-exit
 
+  // ── Conditional-perp market-maker (the impact primitive: CPY/CPN legs) ──────
+  /** Which conditional leg(s) to quote: cpy (IF-YES perp) / cpn (IF-NO perp) / both. */
+  COND_ROLE: z.enum(["cpy", "cpn", "both"]).default("both"),
+  /** Half-spread on the conditional legs — wider than base MM to reflect illiquidity + void risk. */
+  COND_SPREAD_BPS: z.coerce.number().int().positive().default(120),
+  COND_ORDER_QTY: z.coerce.bigint().default(10n),
+  COND_MAX_POSITION: z.coerce.bigint().default(100n),
+  /** Delta-hedge net conditional inventory on the base perp to stay market-neutral pre-resolution. */
+  COND_HEDGE_ENABLED: z.preprocess(boolish, z.boolean()).default(true),
+  COND_HEDGE_QTY: z.coerce.bigint().default(10n),
+  COND_HEDGE_MAX: z.coerce.bigint().default(200n),
+  /** Fallback CPY premium / CPN discount vs base when the binary book is too thin to imply prob. */
+  COND_PREMIUM_OFFSET_BPS: z.coerce.number().int().nonnegative().default(300),
+  /** Don't quote when one branch is near-certain (void-skewed, degenerate bounded pricing). */
+  COND_PROB_FLOOR_BPS: z.coerce.number().int().nonnegative().default(500),
+  COND_PROB_CEIL_BPS: z.coerce.number().int().nonnegative().default(9500),
+  /** Gate the CPB taker convergence basket (base vs the in-branch twin). Default OFF — maker first. */
+  COND_TAKER_ENABLED: z.preprocess(boolish, z.boolean()).default(false),
+  /** Min |conditional-parity residual| (bps of base) before the taker basket fires. */
+  COND_TAKER_EDGE_BPS: z.coerce.number().int().positive().default(80),
+
   // ── Risk / kill-switch ───────────────────────────────────────────────────
   MIN_MARGIN_RATIO_BPS: z.coerce.number().int().nonnegative().default(2000), // 20%
   MAX_DRAWDOWN_BPS: z.coerce.number().int().positive().default(1000), // 10%
@@ -159,6 +180,19 @@ export interface Config {
   volTakeProfitBps: number;
   volStopBps: number;
   volHoldMs: number;
+
+  condRole: "cpy" | "cpn" | "both";
+  condSpreadBps: number;
+  condOrderQty: bigint;
+  condMaxPosition: bigint;
+  condHedgeEnabled: boolean;
+  condHedgeQty: bigint;
+  condHedgeMax: bigint;
+  condPremiumOffsetBps: number;
+  condProbFloorBps: number;
+  condProbCeilBps: number;
+  condTakerEnabled: boolean;
+  condTakerEdgeBps: number;
 
   minMarginRatioBps: number;
   maxDrawdownBps: number;
@@ -245,6 +279,19 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     volTakeProfitBps: e.VOL_TAKE_PROFIT_BPS,
     volStopBps: e.VOL_STOP_BPS,
     volHoldMs: e.VOL_HOLD_MS,
+
+    condRole: e.COND_ROLE,
+    condSpreadBps: e.COND_SPREAD_BPS,
+    condOrderQty: e.COND_ORDER_QTY,
+    condMaxPosition: e.COND_MAX_POSITION,
+    condHedgeEnabled: e.COND_HEDGE_ENABLED,
+    condHedgeQty: e.COND_HEDGE_QTY,
+    condHedgeMax: e.COND_HEDGE_MAX,
+    condPremiumOffsetBps: e.COND_PREMIUM_OFFSET_BPS,
+    condProbFloorBps: e.COND_PROB_FLOOR_BPS,
+    condProbCeilBps: e.COND_PROB_CEIL_BPS,
+    condTakerEnabled: e.COND_TAKER_ENABLED,
+    condTakerEdgeBps: e.COND_TAKER_EDGE_BPS,
 
     minMarginRatioBps: e.MIN_MARGIN_RATIO_BPS,
     maxDrawdownBps: e.MAX_DRAWDOWN_BPS,

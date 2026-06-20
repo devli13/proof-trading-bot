@@ -5,6 +5,7 @@ import { ParityArbStrategy } from "./parity-arb.js";
 import { DirectionalStrategy } from "./directional.js";
 import { VolumeDriverStrategy } from "./volume-driver.js";
 import { MaxProfitStrategy } from "./max-profit.js";
+import { ConditionalMmStrategy } from "./conditional-mm.js";
 
 export type { Strategy, StrategyContext } from "./types.js";
 
@@ -21,6 +22,8 @@ function makeStrategy(name: string, config: Config): Strategy | null {
       return new DirectionalStrategy("mean-reversion", -1, config.dirMarket, config.dirWindow);
     case "volume-driver":
       return new VolumeDriverStrategy(config.volMarket);
+    case "conditional-mm":
+      return new ConditionalMmStrategy(config.condRole);
     case "max-profit":
       return new MaxProfitStrategy(
         new ParityArbStrategy(),
