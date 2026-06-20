@@ -4,10 +4,14 @@ import { VolumeDriverStrategy } from "./volume-driver.js";
 
 const META = { market: 7, tickSize: 0n, lotSize: 0n, szDecimals: 2, takerFeeBps: 5, makerFeeBps: 2 };
 const book = { bids: [{ price: 67700000n }], asks: [{ price: 67710000n }] }; // mid 67705000
-const cfg = (over = {}) => ({ network: "devnet", volOrderQty: 20n, volMaxPosition: 40n, volTakeProfitBps: 15, volStopBps: 25, volHoldMs: 60000, ...over });
+const cfg = (over = {}) => ({ network: "devnet", volOrderQty: 20n, volMaxPosition: 40n, volSpreadBps: 30, ...over });
 
 function fakeCtx(opts: { config?: object; pos?: unknown; nowMs?: number; meta?: unknown; book?: unknown } = {}) {
-  const calls = { place: [] as Record<string, unknown>[], decisions: [] as { action: string; detail: unknown }[] };
+  const calls = {
+    place: [] as Record<string, unknown>[],
+    cancels: [] as number[],
+    decisions: [] as { action: string; detail: unknown }[],
+  };
   const ctx = {
     config: opts.config ?? cfg(),
     legs: { underlying: 7 },
@@ -16,13 +20,14 @@ function fakeCtx(opts: { config?: object; pos?: unknown; nowMs?: number; meta?: 
     orderbook: async () => opts.book ?? book,
     positionFor: () => opts.pos,
     place: async (p: Record<string, unknown>) => { calls.place.push(p); return null; },
+    cancelMarket: async (m: number) => { calls.cancels.push(m); return null; },
     recordDecision: (action: string, detail: unknown) => calls.decisions.push({ action, detail }),
     logger: { error: () => {}, debug: () => {} },
   };
   return { ctx, calls };
 }
 
-describe("VolumeDriverStrategy", () => {
+describe("VolumeDriverStrategy (post-only maker)", () => {
   it("is devnet-gated", async () => {
     const { ctx, calls } = fakeCtx({ config: cfg({ network: "custom" }) });
     await new VolumeDriverStrategy(0).onTick(ctx as never);
@@ -30,34 +35,38 @@ describe("VolumeDriverStrategy", () => {
     expect(calls.decisions[0]?.action).toBe("skip");
   });
 
-  it("opens a sized taker position when flat (clamped to volMaxPosition)", async () => {
-    const { ctx, calls } = fakeCtx({ pos: undefined, config: cfg({ volOrderQty: 100n, volMaxPosition: 40n }) });
+  it("quotes BOTH sides post-only when flat (cancel-replace), straddling mid", async () => {
+    const { ctx, calls } = fakeCtx({ pos: undefined });
     await new VolumeDriverStrategy(0).onTick(ctx as never);
-    expect(calls.place).toHaveLength(1);
-    expect(calls.place[0]).toMatchObject({ market: 7, side: Side.Buy, quantity: 40n }); // clamped 100→40
-    expect(calls.place[0]!.price).toBe(67710000n); // taker at the ask
-    expect(calls.decisions.some((d) => d.action === "vol-open")).toBe(true);
+    expect(calls.cancels).toEqual([7]); // cancel-replace, scoped to this market only
+    expect(calls.place).toHaveLength(2);
+    const buy = calls.place.find((p) => p.side === Side.Buy);
+    const sell = calls.place.find((p) => p.side === Side.Sell);
+    expect(buy).toMatchObject({ market: 7, postOnly: true, quantity: 20n });
+    expect(sell).toMatchObject({ market: 7, postOnly: true, quantity: 20n });
+    // maker quotes straddle mid (67705000): bid below, ask above — never crosses (post-only)
+    expect(buy!.price as bigint).toBeLessThan(67705000n);
+    expect(sell!.price as bigint).toBeGreaterThan(67705000n);
+    expect(calls.decisions.some((d) => d.action === "quote")).toBe(true);
   });
 
-  it("takes profit (reduce-only close) once unrealized clears the TP threshold", async () => {
-    // long, entry well below mid → big positive unrealized
-    const { ctx, calls } = fakeCtx({ pos: { side: "Buy", size: 20n, entryPrice: 67000000n } });
+  it("suppresses the inventory-growing side at the position cap", async () => {
+    // long at the cap → posting another bid would grow long past max; only the ask (reduces) posts
+    const { ctx, calls } = fakeCtx({ pos: { side: "Buy", size: 40n } });
     await new VolumeDriverStrategy(0).onTick(ctx as never);
     expect(calls.place).toHaveLength(1);
-    expect(calls.place[0]).toMatchObject({ side: Side.Sell, reduceOnly: true, quantity: 20n });
-    const close = calls.decisions.find((d) => d.action === "vol-close");
-    expect((close?.detail as { reason: string }).reason).toBe("take-profit");
-  });
-
-  it("holds when in a position within the TP/SL band", async () => {
-    const { ctx, calls } = fakeCtx({ pos: { side: "Buy", size: 20n, entryPrice: 67705000n } }); // ~flat PnL
-    await new VolumeDriverStrategy(0).onTick(ctx as never);
-    expect(calls.place).toHaveLength(0);
-    expect(calls.decisions.some((d) => d.action === "vol-hold")).toBe(true);
+    expect(calls.place[0]).toMatchObject({ side: Side.Sell, postOnly: true });
   });
 
   it("skips on missing market meta", async () => {
     const { ctx, calls } = fakeCtx({ meta: null });
+    await new VolumeDriverStrategy(0).onTick(ctx as never);
+    expect(calls.place).toHaveLength(0);
+    expect(calls.decisions.some((d) => d.action === "skip")).toBe(true);
+  });
+
+  it("skips on a one-sided book", async () => {
+    const { ctx, calls } = fakeCtx({ book: { bids: [], asks: [{ price: 67710000n }] } });
     await new VolumeDriverStrategy(0).onTick(ctx as never);
     expect(calls.place).toHaveLength(0);
     expect(calls.decisions.some((d) => d.action === "skip")).toBe(true);

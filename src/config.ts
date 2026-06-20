@@ -68,11 +68,17 @@ const EnvSchema = z.object({
   DIR_THRESHOLD_BPS: z.coerce.number().int().positive().default(15), // band around the mean
   DIR_ORDER_QTY: z.coerce.bigint().default(10n),
   DIR_MAX_POSITION: z.coerce.bigint().default(50n),
+  /** Rest entries passively (post-only maker) instead of crossing the spread (taker).
+   *  Stops paying the spread; fills become fill-rate-dependent. */
+  DIR_POST_ONLY: z.preprocess(boolish, z.boolean()).default(false),
 
   // ── Volume / volatility driver (devnet-only) ───────────────────────────────
   VOL_MARKET: z.coerce.number().int().nonnegative().default(0),
   VOL_ORDER_QTY: z.coerce.bigint().default(20n), // sizable enough to move the book
   VOL_MAX_POSITION: z.coerce.bigint().default(40n),
+  /** Post-only maker half-spread for the (redesigned) volume-driver — it now quotes
+   *  two-sided like the market-maker to drive volume by EARNING the spread, not paying it. */
+  VOL_SPREAD_BPS: z.coerce.number().int().positive().default(30),
   VOL_TAKE_PROFIT_BPS: z.coerce.number().int().positive().default(15),
   VOL_STOP_BPS: z.coerce.number().int().positive().default(25), // hard loss cap per cycle
   VOL_HOLD_MS: z.coerce.number().int().positive().default(60_000), // time-exit
@@ -139,10 +145,12 @@ export interface Config {
   dirThresholdBps: number;
   dirOrderQty: bigint;
   dirMaxPosition: bigint;
+  dirPostOnly: boolean;
 
   volMarket: number;
   volOrderQty: bigint;
   volMaxPosition: bigint;
+  volSpreadBps: number;
   volTakeProfitBps: number;
   volStopBps: number;
   volHoldMs: number;
@@ -222,10 +230,12 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     dirThresholdBps: e.DIR_THRESHOLD_BPS,
     dirOrderQty: e.DIR_ORDER_QTY,
     dirMaxPosition: e.DIR_MAX_POSITION,
+    dirPostOnly: e.DIR_POST_ONLY,
 
     volMarket: e.VOL_MARKET,
     volOrderQty: e.VOL_ORDER_QTY,
     volMaxPosition: e.VOL_MAX_POSITION,
+    volSpreadBps: e.VOL_SPREAD_BPS,
     volTakeProfitBps: e.VOL_TAKE_PROFIT_BPS,
     volStopBps: e.VOL_STOP_BPS,
     volHoldMs: e.VOL_HOLD_MS,

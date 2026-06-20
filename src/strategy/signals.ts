@@ -56,9 +56,10 @@ export function directionalTarget(
 }
 
 /**
- * Move `market` one step toward a signed target (clamped to ±maxPos) via a
- * marketable (taker) limit at the opposite top of book. Steps by at most
- * `orderQty` per tick. Returns true if it placed an order.
+ * Move `market` one step toward a signed target (clamped to ±maxPos). Steps by at most
+ * `orderQty` per tick. When `postOnly` is false it crosses at the opposite top of book
+ * (taker — pays the spread); when true it rests PASSIVELY at the near top (maker — earns
+ * the spread, fills only when the market comes to it). Returns true if it placed an order.
  */
 export async function stepToward(
   ctx: StrategyContext,
@@ -68,6 +69,7 @@ export async function stepToward(
   orderQty: bigint,
   maxPos: bigint,
   book: Orderbook,
+  postOnly = false,
 ): Promise<boolean> {
   let tgt = target;
   if (tgt > maxPos) tgt = maxPos;
@@ -77,10 +79,17 @@ export async function stepToward(
   const side = delta > 0n ? Side.Buy : Side.Sell;
   let qty = absBig(delta);
   if (qty > orderQty) qty = orderQty;
-  const top = side === Side.Buy ? book.asks[0]?.price : book.bids[0]?.price;
+  // taker crosses at the OPPOSITE top; maker rests at the NEAR top (Buy→bid, Sell→ask).
+  const top = postOnly
+    ? side === Side.Buy
+      ? book.bids[0]?.price
+      : book.asks[0]?.price
+    : side === Side.Buy
+      ? book.asks[0]?.price
+      : book.bids[0]?.price;
   if (top === undefined || qty <= 0n) return false;
   // crossing toward the position's reducing direction is reduce-only-safe; growing is capped above
   const reduceOnly = (current > 0n && side === Side.Sell) || (current < 0n && side === Side.Buy);
-  await ctx.place({ market, side, price: top, quantity: qty, postOnly: false, reduceOnly });
+  await ctx.place({ market, side, price: top, quantity: qty, postOnly, reduceOnly });
   return true;
 }

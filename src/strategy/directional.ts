@@ -49,7 +49,7 @@ export class DirectionalStrategy implements Strategy {
 
     const cur = signedSize(ctx.positionFor(market));
     const target = directionalTarget(mid, mean, ctx.config.dirThresholdBps, ctx.config.dirMaxPosition, this.sign);
-    const acted = await stepToward(ctx, market, cur, target, ctx.config.dirOrderQty, ctx.config.dirMaxPosition, book);
+    const acted = await stepToward(ctx, market, cur, target, ctx.config.dirOrderQty, ctx.config.dirMaxPosition, book, ctx.config.dirPostOnly);
 
     ctx.recordDecision(acted ? "step" : "hold", {
       market,

@@ -78,6 +78,14 @@ describe("stepToward", () => {
     expect(calls[0]).toMatchObject({ market: 7, side: Side.Buy, price: 102n, quantity: 20n, reduceOnly: false });
   });
 
+  it("post-only mode rests PASSIVELY (maker): buy at the bid, sell at the ask — never crosses", async () => {
+    const { ctx, calls } = fakeCtx();
+    await stepToward(ctx, 7, 0n, 50n, 20n, 50n, book(100n, 102n), true); // higher target → buy
+    expect(calls[0]).toMatchObject({ side: Side.Buy, price: 100n, postOnly: true }); // rests at bid, not ask
+    await stepToward(ctx, 7, 0n, -50n, 20n, 50n, book(100n, 102n), true); // lower target → sell
+    expect(calls[1]).toMatchObject({ side: Side.Sell, price: 102n, postOnly: true }); // rests at ask, not bid
+  });
+
   it("sells at the bid toward a lower target", async () => {
     const { ctx, calls } = fakeCtx();
     await stepToward(ctx, 7, 0n, -50n, 20n, 50n, book(100n, 102n));
