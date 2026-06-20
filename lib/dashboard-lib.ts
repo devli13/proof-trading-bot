@@ -63,13 +63,24 @@ export interface XY {
   y: number | null;
 }
 
-// Insert a null point between samples >5min apart so the chart shows a gap, not a line.
+// Insert a null point when a sample is much further from its predecessor than the TYPICAL
+// spacing — so a real outage shows a gap, but the normal (range-dependent) bucket cadence
+// doesn't. The threshold adapts to the bin size (median interval × 3, floor 90s), so it
+// works for 1-min buckets (1h view) and 1-hour buckets (all view) alike — a fixed 5-min
+// cutoff broke every coarse-bucket range (all/7d/30d) by nulling out every segment.
 export const withGaps = (pts: XY[]): XY[] => {
+  if (pts.length < 3) return pts;
+  const deltas: number[] = [];
+  for (let i = 1; i < pts.length; i++) deltas.push(pts[i]!.x - pts[i - 1]!.x);
+  const sorted = [...deltas].sort((a, b) => a - b);
+  // Lower-middle median = the TYPICAL spacing, not skewed upward by the few real gaps.
+  const typical = sorted[Math.floor((sorted.length - 1) / 2)] ?? 0;
+  const threshold = Math.max(typical * 3, 90_000);
   const out: XY[] = [];
   for (let i = 0; i < pts.length; i++) {
     const p = pts[i]!;
     const prev = pts[i - 1];
-    if (i && prev && p.x - prev.x > 5 * 60000) out.push({ x: (p.x + prev.x) / 2, y: null });
+    if (i && prev && p.x - prev.x > threshold) out.push({ x: (p.x + prev.x) / 2, y: null });
     out.push(p);
   }
   return out;

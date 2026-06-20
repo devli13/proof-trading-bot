@@ -408,8 +408,8 @@ details[open] summary .caret { transform: rotate(90deg); }
   .trade-table-wrap td.l::before { display: none; }
 
   /* ── Overlays / disclosures ── */
-  .pill-tip { right: auto; left: 0; min-width: 0; width: max-content;
-    max-width: calc(100vw - var(--s6)); margin-top: var(--s2); }
+  .pill-tip { right: 0; left: auto; min-width: 0; width: max-content;
+    max-width: calc(100vw - var(--s5)); margin-top: var(--s2); }
   .modal-body { white-space: pre-wrap; overflow-wrap: anywhere; }
   #reference-dl { grid-template-columns: 1fr; row-gap: var(--s1); column-gap: 0; }
   #reference-dl dt { margin-top: var(--s2); }
