@@ -35,11 +35,13 @@ describe("formatting helpers", () => {
     expect(esc('<img src=x onerror=alert(1)>')).toBe("&lt;img src=x onerror=alert(1)&gt;");
     expect(esc('a&b"c\'')).toBe("a&amp;b&quot;c&#39;");
   });
-  it("mkt maps known market ids, falls back to m<id>", () => {
-    expect(mkt(7)).toBe("HYPE");
-    expect(mkt(20302)).toBe("HYPE-EBY");
-    expect(mkt(203)).toBe("HYPE #203");
-    expect(mkt(99)).toBe("m99");
+  it("mkt labels underlyings + any event's legs (no hardcoding)", () => {
+    expect(mkt(7)).toBe("HYPE"); // known underlying
+    expect(mkt(1)).toBe("BTC");
+    expect(mkt(20302)).toBe("E203·YES"); // event 203, role 2 (binary YES)
+    expect(mkt(20303)).toBe("E203·NO");
+    expect(mkt(20100)).toBe("E201·CPY"); // a NEW event's leg, labeled automatically
+    expect(mkt(99)).toBe("perp99"); // unknown underlying fallback
   });
   it("dim appends an alpha hex", () => {
     expect(dim("#7aa2ff", 0.12)).toBe("#7aa2ff1f");
