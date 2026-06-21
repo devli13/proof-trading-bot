@@ -6,6 +6,7 @@ import { DirectionalStrategy } from "./directional.js";
 import { VolumeDriverStrategy } from "./volume-driver.js";
 import { MaxProfitStrategy } from "./max-profit.js";
 import { ConditionalMmStrategy } from "./conditional-mm.js";
+import { BinaryMmStrategy } from "./binary-mm.js";
 
 export type { Strategy, StrategyContext } from "./types.js";
 
@@ -24,6 +25,8 @@ function makeStrategy(name: string, config: Config): Strategy | null {
       return new VolumeDriverStrategy(config.volMarket);
     case "conditional-mm":
       return new ConditionalMmStrategy(config.condRole);
+    case "binary-mm":
+      return new BinaryMmStrategy(config.binRole);
     case "max-profit":
       return new MaxProfitStrategy(
         new ParityArbStrategy(),

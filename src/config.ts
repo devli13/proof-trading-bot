@@ -108,6 +108,17 @@ const EnvSchema = z.object({
   /** Min |conditional-parity residual| (bps of base) before the taker basket fires. */
   COND_TAKER_EDGE_BPS: z.coerce.number().int().positive().default(80),
 
+  // ── Prediction-binary market-maker (EBY/EBN — the 0..$1 YES/NO tokens) ──────
+  /** Which binary leg(s) to quote: eby (YES) / ebn (NO) / both. */
+  BIN_ROLE: z.enum(["eby", "ebn", "both"]).default("both"),
+  /** Half-spread as bps of $1 (NOT bps of mid — binaries are bounded 0..$1). */
+  BIN_SPREAD_BPS: z.coerce.number().int().positive().default(200),
+  BIN_ORDER_QTY: z.coerce.bigint().default(100n), // lot=100 on binary legs
+  BIN_MAX_POSITION: z.coerce.bigint().default(1000n),
+  /** Don't quote when one outcome is near-certain (degenerate pricing near 0/$1). */
+  BIN_PROB_FLOOR_BPS: z.coerce.number().int().nonnegative().default(300),
+  BIN_PROB_CEIL_BPS: z.coerce.number().int().nonnegative().default(9700),
+
   // ── Risk / kill-switch ───────────────────────────────────────────────────
   MIN_MARGIN_RATIO_BPS: z.coerce.number().int().nonnegative().default(2000), // 20%
   MAX_DRAWDOWN_BPS: z.coerce.number().int().positive().default(1000), // 10%
@@ -193,6 +204,13 @@ export interface Config {
   condProbCeilBps: number;
   condTakerEnabled: boolean;
   condTakerEdgeBps: number;
+
+  binRole: "eby" | "ebn" | "both";
+  binSpreadBps: number;
+  binOrderQty: bigint;
+  binMaxPosition: bigint;
+  binProbFloorBps: number;
+  binProbCeilBps: number;
 
   minMarginRatioBps: number;
   maxDrawdownBps: number;
@@ -292,6 +310,13 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     condProbCeilBps: e.COND_PROB_CEIL_BPS,
     condTakerEnabled: e.COND_TAKER_ENABLED,
     condTakerEdgeBps: e.COND_TAKER_EDGE_BPS,
+
+    binRole: e.BIN_ROLE,
+    binSpreadBps: e.BIN_SPREAD_BPS,
+    binOrderQty: e.BIN_ORDER_QTY,
+    binMaxPosition: e.BIN_MAX_POSITION,
+    binProbFloorBps: e.BIN_PROB_FLOOR_BPS,
+    binProbCeilBps: e.BIN_PROB_CEIL_BPS,
 
     minMarginRatioBps: e.MIN_MARGIN_RATIO_BPS,
     maxDrawdownBps: e.MAX_DRAWDOWN_BPS,
