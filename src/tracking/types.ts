@@ -50,5 +50,8 @@ export interface Tracker {
   recordOrder(o: OrderRecord): Promise<void>;
   recordSnapshot(s: PositionSnapshot): Promise<void>;
   recordDecision(d: DecisionRecord): Promise<void>;
+  /** Delete bot_orders/bot_decisions older than `retentionHours` (0 = no-op). Batched.
+   *  Returns the number of rows pruned. Keeps the ledger (+ dashboard queries) bounded. */
+  prune(retentionHours: number): Promise<number>;
   close(): Promise<void>;
 }

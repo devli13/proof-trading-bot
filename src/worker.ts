@@ -153,7 +153,16 @@ export async function runWorker(): Promise<void> {
   await syncRoster();
   logger.info({ bots: engines.size, tickMs: baseConfig.tickIntervalMs, refreshMs: baseConfig.botsRefreshMs, dryRun: baseConfig.dryRun }, "worker: started");
 
+  // Retention: clear the backlog now (async — doesn't block trading) + prune hourly, so the
+  // ledger + the dashboard queries over it stay bounded as the makers write quotes.
+  const runPrune = (): void => {
+    void tracker.prune(baseConfig.orderRetentionHours).catch((err) => logger.warn({ err: (err as Error).message }, "worker: retention prune failed"));
+  };
+  runPrune();
+  const pruneTimer = setInterval(runPrune, 60 * 60 * 1000);
+
   await loop(baseConfig, logger, marketData, engines, syncRoster, async () => {
+    clearInterval(pruneTimer);
     readClient.disconnect();
     await registrySql.end({ timeout: 3 }).catch(() => {});
     await tracker.close();

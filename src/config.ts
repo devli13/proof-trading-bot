@@ -129,6 +129,15 @@ const EnvSchema = z.object({
   RESOLUTION_GUARD_MS: z.coerce.number().int().nonnegative().default(86_400_000), // 24h
   MARKET_CACHE_MS: z.coerce.number().int().positive().default(60_000),
   TICK_INTERVAL_MS: z.coerce.number().int().positive().default(5000),
+  /** Re-quote throttle: a maker only cancel-replaces when its target bid/ask moved more than
+   *  this (bps of the quote) or its inventory changed — otherwise it leaves resting orders.
+   *  Cuts cancel-replace churn ~5-10x (the order firehose that bloated the ledger). */
+  REQUOTE_TOLERANCE_BPS: z.coerce.number().int().nonnegative().default(8),
+  /** Force a refresh at least this often even if the quote is unchanged (bounds staleness). */
+  REQUOTE_FORCE_MS: z.coerce.number().int().positive().default(30_000),
+  /** Worker retention: periodically prune bot_orders/bot_decisions older than this so the
+   *  tracking ledger (and the dashboard queries over it) stay bounded. 0 disables. */
+  ORDER_RETENTION_HOURS: z.coerce.number().int().nonnegative().default(36),
 
   // ── Tracking (Supabase/Postgres) ─────────────────────────────────────────
   DATABASE_URL: z.string().min(1).optional(),
@@ -211,6 +220,10 @@ export interface Config {
   binMaxPosition: bigint;
   binProbFloorBps: number;
   binProbCeilBps: number;
+
+  requoteToleranceBps: number;
+  requoteForceMs: number;
+  orderRetentionHours: number;
 
   minMarginRatioBps: number;
   maxDrawdownBps: number;
@@ -326,6 +339,9 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     resolutionGuardMs: e.RESOLUTION_GUARD_MS,
     marketCacheMs: e.MARKET_CACHE_MS,
     tickIntervalMs: e.TICK_INTERVAL_MS,
+    requoteToleranceBps: e.REQUOTE_TOLERANCE_BPS,
+    requoteForceMs: e.REQUOTE_FORCE_MS,
+    orderRetentionHours: e.ORDER_RETENTION_HOURS,
 
     databaseUrl: e.DATABASE_URL,
     dbSchema: e.DB_SCHEMA,

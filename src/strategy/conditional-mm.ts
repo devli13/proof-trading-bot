@@ -4,6 +4,7 @@ import type { BasketLegArg } from "./types.js";
 import { computeQuotes, signedSize } from "./market-maker.js";
 import { impliedProbBps, conditionalParityResidual, nearResolution } from "../impact.js";
 import { bookMid, stepToward } from "./signals.js";
+import { QuoteThrottle } from "./quote-throttle.js";
 
 type CondRole = "cpy" | "cpn";
 
@@ -30,6 +31,7 @@ type CondRole = "cpy" | "cpn";
  */
 export class ConditionalMmStrategy implements Strategy {
   readonly name = "conditional-mm";
+  private readonly throttle = new QuoteThrottle();
 
   constructor(private readonly role: "cpy" | "cpn" | "both") {}
 
@@ -87,9 +89,14 @@ export class ConditionalMmStrategy implements Strategy {
         orderQty: ctx.config.condOrderQty,
         maxPosition: ctx.config.condMaxPosition,
       });
+      if (!this.throttle.shouldRequote(market, quotes.bid?.price, quotes.ask?.price, position, ctx.nowMs, ctx.config.requoteToleranceBps, ctx.config.requoteForceMs)) {
+        ctx.recordDecision("cond-hold", { role: r, market });
+        continue;
+      }
       await ctx.cancelMarket(market);
       if (quotes.bid) await ctx.place({ market, side: Side.Buy, price: quotes.bid.price, quantity: quotes.bid.qty, postOnly: true });
       if (quotes.ask) await ctx.place({ market, side: Side.Sell, price: quotes.ask.price, quantity: quotes.ask.qty, postOnly: true });
+      this.throttle.record(market, quotes.bid?.price, quotes.ask?.price, position, ctx.nowMs);
       ctx.recordDecision("cond-quote", { role: r, market, anchor: anchor.toString(), position: position.toString(), probBps });
     }
 

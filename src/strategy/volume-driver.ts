@@ -2,6 +2,7 @@ import { Side } from "@proof/trading-sdk";
 import type { Strategy, StrategyContext } from "./types.js";
 import type { EventLegs } from "../impact.js";
 import { computeQuotes, signedSize } from "./market-maker.js";
+import { QuoteThrottle } from "./quote-throttle.js";
 
 /**
  * Volume driver (devnet-only) — REDESIGNED. It used to cycle real taker positions
@@ -17,6 +18,7 @@ import { computeQuotes, signedSize } from "./market-maker.js";
  */
 export class VolumeDriverStrategy implements Strategy {
   readonly name = "volume-driver";
+  private readonly throttle = new QuoteThrottle();
 
   constructor(private readonly configuredMarket: number) {}
 
@@ -51,6 +53,10 @@ export class VolumeDriverStrategy implements Strategy {
       maxPosition: ctx.config.volMaxPosition,
     });
 
+    if (!this.throttle.shouldRequote(market, quotes.bid?.price, quotes.ask?.price, position, ctx.nowMs, ctx.config.requoteToleranceBps, ctx.config.requoteForceMs)) {
+      ctx.recordDecision("quote-hold", { market, position: position.toString() });
+      return;
+    }
     await ctx.cancelMarket(market); // scoped — never touches other strategies' orders
     if (quotes.bid) {
       await ctx.place({ market, side: Side.Buy, price: quotes.bid.price, quantity: quotes.bid.qty, postOnly: true });
@@ -58,6 +64,7 @@ export class VolumeDriverStrategy implements Strategy {
     if (quotes.ask) {
       await ctx.place({ market, side: Side.Sell, price: quotes.ask.price, quantity: quotes.ask.qty, postOnly: true });
     }
+    this.throttle.record(market, quotes.bid?.price, quotes.ask?.price, position, ctx.nowMs);
     ctx.recordDecision("quote", {
       market,
       mid: mid.toString(),

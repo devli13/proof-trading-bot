@@ -3,6 +3,7 @@ import type { Strategy, StrategyContext } from "./types.js";
 import { signedSize } from "./market-maker.js";
 import { ONE_DOLLAR, impliedProbBps, nearResolution } from "../impact.js";
 import { bookMid } from "./signals.js";
+import { QuoteThrottle } from "./quote-throttle.js";
 
 type BinRole = "eby" | "ebn";
 const TICK = 1n; // binary legs trade with tick=1, lot=100, bounded 0..$1 (ONE_DOLLAR)
@@ -52,6 +53,7 @@ export function binaryQuotes(
  */
 export class BinaryMmStrategy implements Strategy {
   readonly name = "binary-mm";
+  private readonly throttle = new QuoteThrottle();
 
   constructor(private readonly role: "eby" | "ebn" | "both") {}
 
@@ -97,9 +99,14 @@ export class BinaryMmStrategy implements Strategy {
       const market = roleMarket[r];
       const position = signedSize(ctx.positionFor(market));
       const q = binaryQuotes(fair[r], position, ctx.config.binSpreadBps, ctx.config.binOrderQty, ctx.config.binMaxPosition);
+      if (!this.throttle.shouldRequote(market, q.bid?.price, q.ask?.price, position, ctx.nowMs, ctx.config.requoteToleranceBps, ctx.config.requoteForceMs)) {
+        ctx.recordDecision("bin-hold", { role: r, market });
+        continue;
+      }
       await ctx.cancelMarket(market);
       if (q.bid) await ctx.place({ market, side: Side.Buy, price: q.bid.price, quantity: q.bid.qty, postOnly: true });
       if (q.ask) await ctx.place({ market, side: Side.Sell, price: q.ask.price, quantity: q.ask.qty, postOnly: true });
+      this.throttle.record(market, q.bid?.price, q.ask?.price, position, ctx.nowMs);
       ctx.recordDecision("bin-quote", { role: r, market, fair: fair[r].toString(), position: position.toString(), probBps });
     }
   }

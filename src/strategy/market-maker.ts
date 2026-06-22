@@ -2,6 +2,7 @@ import { Side } from "@proof/trading-sdk";
 import type { PositionInfo } from "@proof/trading-sdk";
 import type { Strategy, StrategyContext } from "./types.js";
 import type { EventLegs } from "../impact.js";
+import { QuoteThrottle } from "./quote-throttle.js";
 
 export interface MMParams {
   spreadBps: number;
@@ -59,6 +60,7 @@ export function computeQuotes(
  */
 export class MarketMakerStrategy implements Strategy {
   readonly name = "market-maker";
+  private readonly throttle = new QuoteThrottle();
 
   constructor(private readonly configuredMarket: number) {}
 
@@ -88,6 +90,11 @@ export class MarketMakerStrategy implements Strategy {
       maxPosition: ctx.config.mmMaxPosition,
     });
 
+    // Throttle: skip the cancel-replace when nothing material changed (cuts order churn).
+    if (!this.throttle.shouldRequote(market, quotes.bid?.price, quotes.ask?.price, position, ctx.nowMs, ctx.config.requoteToleranceBps, ctx.config.requoteForceMs)) {
+      ctx.recordDecision("quote-hold", { market, position: position.toString() });
+      return;
+    }
     await ctx.cancelMarket(market); // scoped — never touches other strategies' orders
     if (quotes.bid) {
       await ctx.place({ market, side: Side.Buy, price: quotes.bid.price, quantity: quotes.bid.qty, postOnly: true });
@@ -95,6 +102,7 @@ export class MarketMakerStrategy implements Strategy {
     if (quotes.ask) {
       await ctx.place({ market, side: Side.Sell, price: quotes.ask.price, quantity: quotes.ask.qty, postOnly: true });
     }
+    this.throttle.record(market, quotes.bid?.price, quotes.ask?.price, position, ctx.nowMs);
     ctx.recordDecision("quote", {
       market,
       mid: mid.toString(),

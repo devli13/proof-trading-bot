@@ -30,5 +30,9 @@ export class MemoryTracker implements Tracker {
     if (this.decisions.length > 5000) this.decisions.shift();
   }
 
+  async prune(): Promise<number> {
+    return 0; // in-memory ring buffers are already bounded
+  }
+
   async close(): Promise<void> {}
 }

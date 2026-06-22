@@ -241,6 +241,29 @@ export class PostgresTracker implements Tracker {
     }
   }
 
+  async prune(retentionHours: number): Promise<number> {
+    if (retentionHours <= 0) return 0;
+    const cutoff = `${retentionHours} hours`;
+    let pruned = 0;
+    // Batched ctid deletes so we never hold a long lock on the high-write order table.
+    // bot_snapshots is intentionally NOT pruned — the equity series needs full history.
+    for (const tbl of ["bot_orders", "bot_decisions"] as const) {
+      for (let i = 0; i < 200; i++) {
+        try {
+          const r = await this.sql`delete from ${this.table(tbl)} where ctid in (
+            select ctid from ${this.table(tbl)} where ts < now() - ${cutoff}::interval limit 20000)`;
+          pruned += r.count;
+          if (r.count === 0) break;
+        } catch (err) {
+          this.logger?.warn({ err: (err as Error).message, tbl }, "track: prune batch failed");
+          break;
+        }
+      }
+    }
+    if (pruned > 0) this.logger?.info({ pruned, retentionHours }, "track: pruned old ledger rows");
+    return pruned;
+  }
+
   async close(): Promise<void> {
     try {
       await this.sql.end({ timeout: 5 });
