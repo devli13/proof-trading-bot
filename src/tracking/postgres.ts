@@ -244,19 +244,28 @@ export class PostgresTracker implements Tracker {
   async prune(retentionHours: number): Promise<number> {
     if (retentionHours <= 0) return 0;
     const cutoff = `${retentionHours} hours`;
+    const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms));
     let pruned = 0;
-    // Batched ctid deletes so we never hold a long lock on the high-write order table.
-    // bot_snapshots is intentionally NOT pruned — the equity series needs full history.
+    // Small batched ctid deletes (never a long lock on the high-write order table), with a
+    // breath between batches so we don't starve order writes. Transient errors (lock/timeout
+    // under write contention) RETRY rather than abort the whole run — so the backlog actually
+    // clears. bot_snapshots is NOT pruned (the equity series needs full history).
     for (const tbl of ["bot_orders", "bot_decisions"] as const) {
-      for (let i = 0; i < 200; i++) {
+      let consecErrors = 0;
+      for (let i = 0; i < 2000; i++) {
         try {
           const r = await this.sql`delete from ${this.table(tbl)} where ctid in (
-            select ctid from ${this.table(tbl)} where ts < now() - ${cutoff}::interval limit 20000)`;
+            select ctid from ${this.table(tbl)} where ts < now() - ${cutoff}::interval limit 8000)`;
+          consecErrors = 0;
           pruned += r.count;
-          if (r.count === 0) break;
+          if (r.count === 0) break; // caught up
+          await sleep(120);
         } catch (err) {
-          this.logger?.warn({ err: (err as Error).message, tbl }, "track: prune batch failed");
-          break;
+          if (++consecErrors >= 6) {
+            this.logger?.warn({ err: (err as Error).message, tbl }, "track: prune giving up this run");
+            break;
+          }
+          await sleep(1000); // transient (lock/timeout) — back off and retry the batch
         }
       }
     }
