@@ -80,22 +80,24 @@ export async function GET(req: Request): Promise<Response> {
 
     // Every query below is independent → run them CONCURRENTLY (the pool makes this real
     // parallelism, so total latency ≈ the slowest query, not the sum of all nine).
-    const [registry, latest, vol, series, fleetVol, metricsRows, sinceRow, decisions, recent, marketAgg, botMarketAgg] = await Promise.all([
+    const [registry, latest, cellAgg, series, fleetVol, metricsRows, sinceRow, decisions, recent] = await Promise.all([
       sql`select id, strategies, markets, tags, enabled from ${t("bots")} order by id`.catch(
         () => [] as Array<Record<string, unknown>>,
       ),
       sql`select distinct on (bot) bot, equity, balance, positions, ts
         from ${t("bot_snapshots")} order by bot, ts desc`,
-      // WINDOWED (was unbounded): per-bot volume/trades over the selected range. The old
-      // lifetime scan grew O(table) and — at ~1.5M orders from MM quote-churn — blew past the
-      // function timeout. Windowing makes it O(range) and consistent with the range selector.
-      sql`select bot,
+      // ONE windowed bot×market scan that feeds per-bot volume, the per-market breakdown,
+      // AND the bot×market cells — instead of three separate heavy scans (each casting
+      // text→numeric over the whole window). Derived in JS below. Windowed (was an unbounded
+      // O(table) lifetime scan that blew past the function timeout as MM churn grew the table).
+      sql`select bot, market,
           count(*)::int as trades,
-          coalesce(sum((price::numeric) * (quantity::numeric) / 100), 0)::text as volume_micro,
+          coalesce(sum((price::numeric) * (quantity::numeric) / 100), 0) as vol_micro,
+          count(*) filter (where kind = 'order' and strategy = 'market-maker')::int as maker_n,
           max(ts) as last_trade
         from ${t("bot_orders")}
         where (note is null or note <> 'dry-run') and strategy <> 'audit-prep' ${sinceClause}
-        group by bot`,
+        group by bot, market`,
       // Bucketed equity per bot via date_bin (coarse stride → a few hundred points, not thousands).
       sql`select bot, date_bin(${bin}::interval, ts, timestamptz '2000-01-01 00:00:00+00') as m,
           (array_agg(equity order by ts desc))[1] as equity
@@ -126,25 +128,38 @@ export async function GET(req: Request): Promise<Response> {
       sql`select bot, ts, strategy, kind, market, side, price, quantity, check_tx_code
         from ${t("bot_orders")} where (note is null or note <> 'dry-run') and strategy <> 'audit-prep'
         order by ts desc limit 60`,
-      // Per-market breakdown (windowed): volume, trades, maker share, distinct bots.
-      sql`select market,
-          count(*)::int as trades,
-          coalesce(sum((price::numeric) * (quantity::numeric) / 100), 0)::text as volume_micro,
-          count(distinct bot)::int as bots,
-          avg((kind = 'order' and strategy = 'market-maker')::int) as maker_pct
-        from ${t("bot_orders")}
-        where (note is null or note <> 'dry-run') and strategy <> 'audit-prep' ${sinceClause}
-        group by market order by sum((price::numeric) * (quantity::numeric) / 100) desc`,
-      // Bot × market cells (windowed): which bot trades which market + how much.
-      sql`select bot, market,
-          count(*)::int as trades,
-          coalesce(sum((price::numeric) * (quantity::numeric) / 100), 0)::text as volume_micro
-        from ${t("bot_orders")}
-        where (note is null or note <> 'dry-run') and strategy <> 'audit-prep' ${sinceClause}
-        group by bot, market`,
     ]);
 
     await sql.end({ timeout: 3 });
+
+    // Derive per-bot volume, per-market breakdown, and the bot×market cells from the single
+    // bot×market scan (one heavy scan instead of three).
+    const cellRows = cellAgg as unknown as Array<{ bot: string; market: number; trades: number; vol_micro: string; maker_n: number; last_trade: string }>;
+    const cells = cellRows.map((r) => ({ bot: r.bot, market: Number(r.market), trades: Number(r.trades), volume: Number(r.vol_micro) }));
+
+    const byBot = new Map<string, { trades: number; vol: number; last: string | null }>();
+    for (const r of cellRows) {
+      const b = byBot.get(r.bot) ?? { trades: 0, vol: 0, last: null };
+      b.trades += Number(r.trades);
+      b.vol += Number(r.vol_micro);
+      if (r.last_trade && (!b.last || r.last_trade > b.last)) b.last = r.last_trade;
+      byBot.set(r.bot, b);
+    }
+    const vol = [...byBot.entries()].map(([bot, b]) => ({ bot, trades: b.trades, volume_micro: String(Math.round(b.vol)), last_trade: b.last }));
+
+    const byMkt = new Map<number, { trades: number; vol: number; bots: Set<string>; makerN: number }>();
+    for (const r of cellRows) {
+      const m = Number(r.market);
+      const e = byMkt.get(m) ?? { trades: 0, vol: 0, bots: new Set<string>(), makerN: 0 };
+      e.trades += Number(r.trades);
+      e.vol += Number(r.vol_micro);
+      e.makerN += Number(r.maker_n);
+      e.bots.add(r.bot);
+      byMkt.set(m, e);
+    }
+    const markets = [...byMkt.entries()]
+      .map(([market, e]) => ({ market, trades: e.trades, volume: e.vol, bots: e.bots.size, makerPct: e.trades > 0 ? e.makerN / e.trades : null }))
+      .sort((a, b) => b.volume - a.volume);
 
     const bots = computeBots(
       registry as unknown as RegistryRow[],
@@ -169,21 +184,6 @@ export async function GET(req: Request): Promise<Response> {
     const fleetSeries = [...new Set([...eqByM.keys(), ...volByM.keys()])]
       .sort((a, b) => a - b)
       .map((k) => ({ ts: new Date(k).toISOString(), equity: eqByM.get(k) ?? null, volume: volByM.get(k) ?? 0 }));
-
-    // Per-market breakdown + the bot×market cells (which bots trade which markets, $).
-    const markets = (marketAgg as unknown as Array<{ market: number; trades: number; volume_micro: string; bots: number; maker_pct: string | null }>).map((r) => ({
-      market: Number(r.market),
-      trades: Number(r.trades),
-      volume: Number(r.volume_micro),
-      bots: Number(r.bots),
-      makerPct: r.maker_pct == null ? null : Number(r.maker_pct),
-    }));
-    const cells = (botMarketAgg as unknown as Array<{ bot: string; market: number; trades: number; volume_micro: string }>).map((r) => ({
-      bot: r.bot,
-      market: Number(r.market),
-      trades: Number(r.trades),
-      volume: Number(r.volume_micro),
-    }));
 
     return Response.json({
       ok: true,
