@@ -31,7 +31,12 @@ export async function GET(req: Request): Promise<Response> {
     // A small pool (not max:1) so the independent dashboard queries below can run
     // CONCURRENTLY via Promise.all instead of serializing on one connection — that
     // sequential add-up was the bulk of the ~2.6s baseline latency.
-    const sql = postgres(url, { max: 8, prepare: false, idle_timeout: 5, connect_timeout: 10, onnotice: () => {} });
+    // statement_timeout: abort any single query at 20s so a slow scan fails fast (→ 500 the
+    // client can retry) instead of hanging until the function timeout with no response.
+    const sql = postgres(url, {
+      max: 8, prepare: false, idle_timeout: 5, connect_timeout: 10, onnotice: () => {},
+      connection: { statement_timeout: 20000 },
+    });
     const t = (name: string) => sql`${sql(schema)}.${sql(name)}`;
 
     // Global strategy-change log (?changes=1) — fleet-wide audit timeline.
@@ -81,12 +86,15 @@ export async function GET(req: Request): Promise<Response> {
       ),
       sql`select distinct on (bot) bot, equity, balance, positions, ts
         from ${t("bot_snapshots")} order by bot, ts desc`,
+      // WINDOWED (was unbounded): per-bot volume/trades over the selected range. The old
+      // lifetime scan grew O(table) and — at ~1.5M orders from MM quote-churn — blew past the
+      // function timeout. Windowing makes it O(range) and consistent with the range selector.
       sql`select bot,
           count(*)::int as trades,
           coalesce(sum((price::numeric) * (quantity::numeric) / 100), 0)::text as volume_micro,
           max(ts) as last_trade
         from ${t("bot_orders")}
-        where (note is null or note <> 'dry-run') and strategy <> 'audit-prep'
+        where (note is null or note <> 'dry-run') and strategy <> 'audit-prep' ${sinceClause}
         group by bot`,
       // Bucketed equity per bot via date_bin (coarse stride → a few hundred points, not thousands).
       sql`select bot, date_bin(${bin}::interval, ts, timestamptz '2000-01-01 00:00:00+00') as m,

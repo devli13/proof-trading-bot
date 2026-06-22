@@ -36,6 +36,12 @@ create index if not exists bot_orders_strategy_ts_idx on ${schema}.bot_orders (s
 -- windowed metrics, which filter/sort on ts alone (the bot/strategy-leading indexes above
 -- can't serve those). Keeps larger windows (1d/all) fast as order volume grows.
 create index if not exists bot_orders_ts_idx on ${schema}.bot_orders (ts);
+-- COVERING index so the dashboard's windowed aggregates (per-bot vol, per-market, bot×market,
+-- metrics, fleet-volume series) run as INDEX-ONLY range scans over the time window — O(window
+-- rows), independent of total table size. Without this, MM quote-churn (millions of rows) made
+-- the concurrent scans blow past the API function timeout.
+create index if not exists bot_orders_ts_cover_idx on ${schema}.bot_orders
+  (ts) include (bot, market, side, strategy, kind, note, check_tx_code, price, quantity);
 
 create table if not exists ${schema}.bot_snapshots (
   id bigserial primary key,
