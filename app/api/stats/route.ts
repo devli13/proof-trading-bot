@@ -31,10 +31,14 @@ export async function GET(req: Request): Promise<Response> {
     // A small pool (not max:1) so the independent dashboard queries below can run
     // CONCURRENTLY via Promise.all instead of serializing on one connection — that
     // sequential add-up was the bulk of the ~2.6s baseline latency.
-    // statement_timeout: abort any single query at 20s so a slow scan fails fast (→ 500 the
-    // client can retry) instead of hanging until the function timeout with no response.
+    // Small pool (max:3) so each invocation uses few session-pooler slots — the worker's
+    // writers + multiple API invocations were exhausting the ~40-client SESSION pooler
+    // (port 5432), starving the API into a connection hang. The queries are fast now
+    // (~2s) so a tiny pool still finishes quickly. connect_timeout fails fast instead of
+    // hanging; statement_timeout aborts a slow scan. REAL FIX: point DATABASE_URL at the
+    // TRANSACTION pooler (port 6543) — the code is prepare:false (pooler-ready).
     const sql = postgres(url, {
-      max: 8, prepare: false, idle_timeout: 5, connect_timeout: 10, onnotice: () => {},
+      max: 3, prepare: false, idle_timeout: 5, connect_timeout: 8, onnotice: () => {},
       connection: { statement_timeout: 20000 },
     });
     const t = (name: string) => sql`${sql(schema)}.${sql(name)}`;
