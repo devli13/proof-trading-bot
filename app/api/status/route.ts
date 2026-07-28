@@ -30,27 +30,31 @@ export async function GET(req: Request): Promise<Response> {
       const t0 = Date.now();
       await sql`select 1 as ok`;
       db.ping = `ok ${Date.now() - t0}ms`;
+      void concurrent;
       if (deep) {
-        // Replicate the stats route's heavy queries so we can see which one — or the
-        // concurrency — stalls from Vercel. ?deep=1 runs SEQUENTIALLY (isolates per-query
-        // time); &concurrent=1 runs them via Promise.all. TEMPORARY diagnostic.
-        const sc = sql`and ts > now() - ${"24 hours"}::interval`;
-        const t = (n: string) => sql`proof_bot.${sql(n)}`;
-        const time = async (label: string, q: PromiseLike<{ length: number }>): Promise<void> => {
+        // The heavy query — run 3 ways to find what works over the pooler from Vercel:
+        // (A) transaction pooler + parameterized (current, hangs), (B) transaction pooler +
+        // sql.unsafe() SIMPLE protocol, (C) session pooler (5432) + parameterized.
+        const HEAVY = "select bot, market, count(*)::int trades, coalesce(sum((price::numeric)*(quantity::numeric)/100),0) v from proof_bot.bot_orders where (note is null or note<>'dry-run') and strategy<>'audit-prep' and ts > now() - interval '24 hours' group by bot, market";
+        const withTimeout = async <T>(label: string, p: Promise<T>): Promise<void> => {
           const s = Date.now();
-          try { const r = await q; db[label] = `${Date.now() - s}ms (${r.length} rows)`; }
-          catch (e) { db[label] = `ERR ${(e as Error).message.slice(0, 80)}`; }
+          try {
+            const r = (await Promise.race([p, new Promise((_, rej) => setTimeout(() => rej(new Error("hung>10s")), 10000))])) as { length?: number };
+            db[label] = `ok ${Date.now() - s}ms (${r?.length ?? "?"} rows)`;
+          } catch (e) { db[label] = `${(e as Error).message.slice(0, 60)} @${Date.now() - s}ms`; }
         };
-        const jobs = [
-          () => time("q_cells", sql`select bot, market, count(*)::int trades, coalesce(sum((price::numeric)*(quantity::numeric)/100),0) v from ${t("bot_orders")} where (note is null or note<>'dry-run') and strategy<>'audit-prep' ${sc} group by bot, market`),
-          () => time("q_series", sql`select bot, date_bin('5 minutes'::interval, ts, timestamptz '2000-01-01 00:00:00+00') m, (array_agg(equity order by ts desc))[1] e from ${t("bot_snapshots")} where equity::numeric>0 ${sc} group by bot, m`),
-          () => time("q_metrics", sql`select bot, coalesce(avg((price::numeric)*(quantity::numeric)/100),0) a, count(*)::int n from ${t("bot_orders")} where (note is null or note<>'dry-run') and strategy<>'audit-prep' ${sc} group by bot`),
-          () => time("q_latest", sql`select distinct on (bot) bot, equity, ts from ${t("bot_snapshots")} order by bot, ts desc`),
-        ];
-        const whole = Date.now();
-        if (concurrent) await Promise.all(jobs.map((j) => j()));
-        else for (const j of jobs) await j();
-        db.deepTotal = `${Date.now() - whole}ms (${concurrent ? "concurrent" : "sequential"})`;
+        // (A) parameterized on the raw (transaction) pooler
+        await withTimeout("A_tx_param", sql`select bot, market, count(*)::int trades from proof_bot.bot_orders where ts > now() - ${"24 hours"}::interval group by bot, market`);
+        // (B) simple protocol via unsafe on the transaction pooler
+        await withTimeout("B_tx_unsafe", sql.unsafe(HEAVY));
+        // (C) session pooler (5432) with a fresh client, parameterized
+        try {
+          const sessUrl = raw.replace(":6543/", ":5432/");
+          const { default: pg2 } = await import("postgres");
+          const sess = pg2(sessUrl, { max: 1, prepare: false, connect_timeout: 8, idle_timeout: 2, onnotice: () => {} });
+          await withTimeout("C_session_param", sess`select bot, market, count(*)::int trades from proof_bot.bot_orders where ts > now() - ${"24 hours"}::interval group by bot, market`);
+          await sess.end({ timeout: 3 });
+        } catch (e) { db.C_session_param = `setup ERR ${(e as Error).message.slice(0, 50)}`; }
       }
       await sql.end({ timeout: 3 });
     } catch (e) {
