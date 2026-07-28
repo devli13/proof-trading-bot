@@ -8,7 +8,6 @@
  * Same host + credentials — only the port differs — so we derive it from DATABASE_URL rather
  * than needing a second secret. No-op for non-Supabase-pooler URLs (e.g. a direct connection).
  */
-export function txPoolerUrl(url: string | undefined): string | undefined {
-  if (!url) return url;
+export function txPoolerUrl(url: string): string {
   return url.includes("pooler.supabase.com:5432") ? url.replace(":5432/", ":6543/") : url;
 }
