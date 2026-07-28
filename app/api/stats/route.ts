@@ -10,6 +10,7 @@ import {
   type SeriesRow,
   type MetricsRow,
 } from "../../../src/stats-core.js";
+import { txPoolerUrl } from "../../../lib/db-url.js";
 
 // Postgres (TCP) + the pure core need Node, and fleet data must never be cached.
 export const runtime = "nodejs";
@@ -31,14 +32,11 @@ export async function GET(req: Request): Promise<Response> {
     // A small pool (not max:1) so the independent dashboard queries below can run
     // CONCURRENTLY via Promise.all instead of serializing on one connection — that
     // sequential add-up was the bulk of the ~2.6s baseline latency.
-    // Small pool (max:3) so each invocation uses few session-pooler slots — the worker's
-    // writers + multiple API invocations were exhausting the ~40-client SESSION pooler
-    // (port 5432), starving the API into a connection hang. The queries are fast now
-    // (~2s) so a tiny pool still finishes quickly. connect_timeout fails fast instead of
-    // hanging; statement_timeout aborts a slow scan. REAL FIX: point DATABASE_URL at the
-    // TRANSACTION pooler (port 6543) — the code is prepare:false (pooler-ready).
-    const sql = postgres(url, {
-      max: 3, prepare: false, idle_timeout: 5, connect_timeout: 8, onnotice: () => {},
+    // Use the TRANSACTION pooler (port 6543) — derived from DATABASE_URL — so serverless
+    // invocations don't leak session-mode connections and exhaust the ~40-client session pool
+    // (which was hanging every request). prepare:false is transaction-pooler-compatible.
+    const sql = postgres(txPoolerUrl(url), {
+      max: 5, prepare: false, idle_timeout: 5, connect_timeout: 8, onnotice: () => {},
       connection: { statement_timeout: 20000 },
     });
     const t = (name: string) => sql`${sql(schema)}.${sql(name)}`;

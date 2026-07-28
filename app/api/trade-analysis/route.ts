@@ -1,3 +1,5 @@
+import { txPoolerUrl } from "../../../lib/db-url.js";
+
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
@@ -19,7 +21,7 @@ export async function GET(req: Request): Promise<Response> {
 
   try {
     const { default: postgres } = await import("postgres");
-    const sql = postgres(url, { max: 1, prepare: false, idle_timeout: 5, connect_timeout: 10, onnotice: () => {} });
+    const sql = postgres(txPoolerUrl(url), { max: 1, prepare: false, idle_timeout: 5, connect_timeout: 10, onnotice: () => {} });
     const t = (name: string) => sql`${sql(schema)}.${sql(name)}`;
 
     const rows = await sql`
