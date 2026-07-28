@@ -156,7 +156,7 @@ export async function runWorker(): Promise<void> {
   // Retention: clear the backlog now (async — doesn't block trading) + prune hourly, so the
   // ledger + the dashboard queries over it stay bounded as the makers write quotes.
   const runPrune = (): void => {
-    void tracker.prune(baseConfig.orderRetentionHours).catch((err) => logger.warn({ err: (err as Error).message }, "worker: retention prune failed"));
+    void tracker.prune(baseConfig.orderRetentionHours, baseConfig.snapshotRetentionHours).catch((err) => logger.warn({ err: (err as Error).message }, "worker: retention prune failed"));
   };
   runPrune();
   const pruneTimer = setInterval(runPrune, 60 * 60 * 1000);

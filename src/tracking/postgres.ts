@@ -53,6 +53,8 @@ create table if not exists ${schema}.bot_snapshots (
 );
 alter table ${schema}.bot_snapshots add column if not exists bot text not null default 'main';
 create index if not exists bot_snapshots_bot_ts_idx on ${schema}.bot_snapshots (bot, ts);
+-- ts-leading index for the windowed equity series + min(ts) dataSince + retention prune.
+create index if not exists bot_snapshots_ts_idx on ${schema}.bot_snapshots (ts);
 
 create table if not exists ${schema}.bot_decisions (
   id bigserial primary key,
@@ -241,18 +243,24 @@ export class PostgresTracker implements Tracker {
     }
   }
 
-  async prune(retentionHours: number): Promise<number> {
-    if (retentionHours <= 0) return 0;
-    const cutoff = `${retentionHours} hours`;
+  async prune(orderHours: number, snapshotHours = 0): Promise<number> {
     const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms));
     let pruned = 0;
-    // Small batched ctid deletes (never a long lock on the high-write order table), with a
-    // breath between batches so we don't starve order writes. Transient errors (lock/timeout
-    // under write contention) RETRY rather than abort the whole run — so the backlog actually
-    // clears. bot_snapshots is NOT pruned (the equity series needs full history).
-    for (const tbl of ["bot_orders", "bot_decisions"] as const) {
+    // Small batched ctid deletes (never a long lock on the high-write tables), with a breath
+    // between batches so we don't starve writes. Transient errors (lock/timeout under write
+    // contention) RETRY rather than abort, so the backlog actually clears. bot_snapshots gets
+    // a SEPARATE, longer retention (it feeds the equity series) but must still be bounded — it
+    // grew to 8M+ rows unpruned and stalled the dashboard's DISTINCT ON.
+    const targets: Array<[string, number]> = [
+      ["bot_orders", orderHours],
+      ["bot_decisions", orderHours],
+      ["bot_snapshots", snapshotHours],
+    ];
+    for (const [tbl, hours] of targets) {
+      if (hours <= 0) continue;
+      const cutoff = `${hours} hours`;
       let consecErrors = 0;
-      for (let i = 0; i < 2000; i++) {
+      for (let i = 0; i < 4000; i++) {
         try {
           const r = await this.sql`delete from ${this.table(tbl)} where ctid in (
             select ctid from ${this.table(tbl)} where ts < now() - ${cutoff}::interval limit 8000)`;
@@ -269,7 +277,7 @@ export class PostgresTracker implements Tracker {
         }
       }
     }
-    if (pruned > 0) this.logger?.info({ pruned, retentionHours }, "track: pruned old ledger rows");
+    if (pruned > 0) this.logger?.info({ pruned, orderHours, snapshotHours }, "track: pruned old ledger rows");
     return pruned;
   }
 

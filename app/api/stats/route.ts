@@ -86,8 +86,11 @@ export async function GET(req: Request): Promise<Response> {
       sql`select id, strategies, markets, tags, enabled from ${t("bots")} order by id`.catch(
         () => [] as Array<Record<string, unknown>>,
       ),
+      // Latest snapshot per bot — bounded to the last 6h so DISTINCT ON scans only recent
+      // index entries, not the whole (unbounded, multi-million-row) bot_snapshots table.
+      // Active bots snapshot every tick, so 6h always covers them.
       sql`select distinct on (bot) bot, equity, balance, positions, ts
-        from ${t("bot_snapshots")} order by bot, ts desc`,
+        from ${t("bot_snapshots")} where ts > now() - interval '6 hours' order by bot, ts desc`,
       // ONE windowed bot×market scan that feeds per-bot volume, the per-market breakdown,
       // AND the bot×market cells — instead of three separate heavy scans (each casting
       // text→numeric over the whole window). Derived in JS below. Windowed (was an unbounded

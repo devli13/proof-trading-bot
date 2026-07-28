@@ -138,6 +138,9 @@ const EnvSchema = z.object({
   /** Worker retention: periodically prune bot_orders/bot_decisions older than this so the
    *  tracking ledger (and the dashboard queries over it) stay bounded. 0 disables. */
   ORDER_RETENTION_HOURS: z.coerce.number().int().nonnegative().default(36),
+  /** Separate (longer) retention for bot_snapshots — it feeds the equity series + "all"
+   *  chart, so keep more history, but bound it (it grew to 8M+ rows unpruned). 0 disables. */
+  SNAPSHOT_RETENTION_HOURS: z.coerce.number().int().nonnegative().default(336), // 14 days
 
   // ── Tracking (Supabase/Postgres) ─────────────────────────────────────────
   DATABASE_URL: z.string().min(1).optional(),
@@ -224,6 +227,7 @@ export interface Config {
   requoteToleranceBps: number;
   requoteForceMs: number;
   orderRetentionHours: number;
+  snapshotRetentionHours: number;
 
   minMarginRatioBps: number;
   maxDrawdownBps: number;
@@ -342,6 +346,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     requoteToleranceBps: e.REQUOTE_TOLERANCE_BPS,
     requoteForceMs: e.REQUOTE_FORCE_MS,
     orderRetentionHours: e.ORDER_RETENTION_HOURS,
+    snapshotRetentionHours: e.SNAPSHOT_RETENTION_HOURS,
 
     databaseUrl: e.DATABASE_URL,
     dbSchema: e.DB_SCHEMA,
