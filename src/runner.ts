@@ -65,6 +65,7 @@ export interface BotEngineDeps {
 export class BotEngine {
   private submitChain: Promise<unknown> = Promise.resolve();
   private lastSubmitMs = 0;
+  private lastSnapshotMs = 0;
   private readonly riskState: RiskState = newRiskState();
   private halted = false;
 
@@ -147,7 +148,12 @@ export class BotEngine {
       queryAccountViaInfo(this.config.gatewayUrl, this.wallet.address0x),
     ).catch(() => null);
 
-    if (account) void this.recordSnapshot(account, now);
+    // Throttle equity snapshots (was every tick ~3s → millions of rows/month). One every
+    // ~SNAPSHOT_INTERVAL_MS is ample for the equity chart and keeps bot_snapshots small.
+    if (account && now - this.lastSnapshotMs >= this.config.snapshotIntervalMs) {
+      this.lastSnapshotMs = now;
+      void this.recordSnapshot(account, now);
+    }
 
     // Unreadable account → SKIP this tick (checked BEFORE the kill-switch): don't trade
     // blind (positionFor would read flat and a directional/volume strategy could re-enter

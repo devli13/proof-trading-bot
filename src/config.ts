@@ -129,6 +129,9 @@ const EnvSchema = z.object({
   RESOLUTION_GUARD_MS: z.coerce.number().int().nonnegative().default(86_400_000), // 24h
   MARKET_CACHE_MS: z.coerce.number().int().positive().default(60_000),
   TICK_INTERVAL_MS: z.coerce.number().int().positive().default(5000),
+  /** Min gap between equity snapshots per bot. Snapshotting every tick (~3s) grew
+   *  bot_snapshots to 8M+ rows/month; ~20s is plenty for the equity chart. */
+  SNAPSHOT_INTERVAL_MS: z.coerce.number().int().nonnegative().default(20_000),
   /** Re-quote throttle: a maker only cancel-replaces when its target bid/ask moved more than
    *  this (bps of the quote) or its inventory changed — otherwise it leaves resting orders.
    *  Cuts cancel-replace churn ~5-10x (the order firehose that bloated the ledger). */
@@ -237,6 +240,7 @@ export interface Config {
   resolutionGuardMs: number;
   marketCacheMs: number;
   tickIntervalMs: number;
+  snapshotIntervalMs: number;
 
   databaseUrl?: string;
   dbSchema: string;
@@ -343,6 +347,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     resolutionGuardMs: e.RESOLUTION_GUARD_MS,
     marketCacheMs: e.MARKET_CACHE_MS,
     tickIntervalMs: e.TICK_INTERVAL_MS,
+    snapshotIntervalMs: e.SNAPSHOT_INTERVAL_MS,
     requoteToleranceBps: e.REQUOTE_TOLERANCE_BPS,
     requoteForceMs: e.REQUOTE_FORCE_MS,
     orderRetentionHours: e.ORDER_RETENTION_HOURS,
