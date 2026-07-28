@@ -34,9 +34,9 @@ export async function GET(req: Request): Promise<Response> {
         // see which one — or the concurrency itself — stalls from Vercel. TEMPORARY diagnostic.
         const sc = sql`and ts > now() - ${"24 hours"}::interval`;
         const t = (n: string) => sql`proof_bot.${sql(n)}`;
-        const time = async (label: string, q: Promise<unknown[]>): Promise<void> => {
+        const time = async (label: string, q: PromiseLike<{ length: number }>): Promise<void> => {
           const s = Date.now();
-          try { const r = await q; db[label] = `${Date.now() - s}ms (${(r as unknown[]).length} rows)`; }
+          try { const r = await q; db[label] = `${Date.now() - s}ms (${r.length} rows)`; }
           catch (e) { db[label] = `ERR ${(e as Error).message.slice(0, 80)}`; }
         };
         await Promise.all([
