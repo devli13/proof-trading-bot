@@ -1,0 +1,39 @@
+# Deploy to the Falkenstein box on every push to main.
+#
+# Coolify is firewalled off the public internet, so GitHub cannot reach it with
+# a webhook. Instead this SSHes to the box and triggers the deploy through
+# Coolify's API over loopback.
+#
+# The key in FSN1_DEPLOY_KEY is command-restricted in authorized_keys: it can
+# only run /usr/local/bin/coolify-deploy, which validates its argument is an
+# application UUID. A leaked key cannot open a shell.
+name: deploy
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-${{ github.ref }}
+  cancel-in-progress: false     # never abort a half-finished deployment
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Trigger Coolify deployment
+        env:
+          KEY: ${{ secrets.FSN1_DEPLOY_KEY }}
+          HOST: ${{ secrets.FSN1_HOST }}
+          UUID: ${{ secrets.FSN1_APP_UUID }}
+        run: |
+          set -euo pipefail
+          test -n "$KEY" && test -n "$HOST" && test -n "$UUID"
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "$KEY" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          ssh-keyscan -t ed25519 "$HOST" >> ~/.ssh/known_hosts 2>/dev/null
+          ssh -o BatchMode=yes -o IdentitiesOnly=yes -i ~/.ssh/id_ed25519 \
+              "root@$HOST" "deploy $UUID"
