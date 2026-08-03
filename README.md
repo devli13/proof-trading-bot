@@ -29,8 +29,9 @@ with a Supabase-backed **registry** + **dashboard**.
   **44 unit tests** green; adversarially audited.
 - ✅ **Dashboard** (`/dashboard`) — per-bot **profit / volume / strategy-logic**,
   filter by **bot / strategy / tag / market**, equity chart with hover tooltips.
-- ✅ **Deploy** — the worker runs on **Render** (`render.yaml`); **Vercel is
-  dashboard-only** (cron disabled). All data in **Supabase** (`proof_bot` schema).
+- ✅ **Deploy** — the worker runs on the **fsn1 Hetzner box** under **Coolify**;
+  **Vercel is dashboard-only** (cron disabled). All data in **Supabase** (`proof_bot`
+  schema).
 - 🟡 **SDK read/confirm gaps remain** (account + open-orders `404` → we read via `/info`;
   CheckTx ≠ DeliverTx → can't confirm execution). All in
   **[`PROOF_SDK_FEEDBACK.md`](./PROOF_SDK_FEEDBACK.md)** (#1–#11).
@@ -129,7 +130,7 @@ committed.
 | `pnpm wallet:new` | Generate a fresh keypair into the keystore.                         |
 | `pnpm fund`       | Drip the devnet faucet into the wallet and verify balance.          |
 | `pnpm smoke`      | One-shot devnet smoke test (connectivity, reads, place+cancel).     |
-| `pnpm worker`     | **Persistent MULTI-bot worker** (registry-driven; the Render entry). |
+| `pnpm worker`     | **Persistent MULTI-bot worker** (registry-driven; the deployed entry). |
 | `pnpm bots ...`   | Manage the registry: `list` / `add <id> <strat> <key\|-> [markets] [tags] [json]` / `disable` / `enable`. |
 | `pnpm tick`       | Run ONE single-bot tick (no resting-order cleanup).                 |
 | `pnpm run`        | Long-lived single-bot loop; flattens (cancel-all) on SIGINT.        |
@@ -156,7 +157,7 @@ kill-switch + submit queue) against a **shared** market-data fetch and tracker. 
 no restart.
 
 ```bash
-# generate the at-rest encryption key once, put it in .env (and Render):
+# generate the at-rest encryption key once, put it in .env (and Coolify):
 node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"   # → BOTS_ENC_KEY
 
 pnpm bots add mm-base    market-maker -  all "market-making,single-strat" '{"MM_SPREAD_BPS":"30"}'
@@ -169,15 +170,29 @@ pnpm worker                    # run them all (DRY_RUN=1 first to dry-run)
 **AES-256-GCM encrypted** with `BOTS_ENC_KEY` before they touch the DB. ⚠️ Give each
 bot its **own** key — two bots on one wallet collide on the ms-timestamp nonce.
 
-### Deploy (Render worker + Vercel dashboard)
+### Deploy (fsn1 worker + Vercel dashboard)
 
-The worker runs on **Render** — create a service from [`render.yaml`](render.yaml)
-(a background worker: `pnpm install` → `pnpm worker`) and set two secrets in the
-dashboard: `DATABASE_URL` and `BOTS_ENC_KEY`. Everything else is in the blueprint.
-Scaling bots is a `pnpm bots add` — no redeploy.
+The worker runs on the **fsn1 Hetzner box** (`178.104.218.251`, Falkenstein — CX43,
+8 vCPU / 16 GB) under **Coolify 4.1.2**. It is a **background worker**: no HTTP port,
+no domain. Built with **Nixpacks** (no Dockerfile) — build `pnpm install`, start
+`pnpm worker`. The two secrets (`DATABASE_URL`, `BOTS_ENC_KEY`) and the non-secret env
+live in **Coolify's env store**, not a Render dashboard. Scaling bots is still a
+`pnpm bots add` — no redeploy.
 
-**Vercel is dashboard-only** (the cron is removed). Push to `main` auto-deploys the
-static dashboard + read-only API. Surfaces:
+Deploys are **push-to-`main`** →
+[`.github/workflows/deploy-fsn1.yml`](.github/workflows/deploy-fsn1.yml), which SSHes
+to the box and triggers Coolify's API **over loopback**. Coolify is firewalled off the
+public internet, so **webhooks are not used** and its UI is reachable only through an
+**SSH tunnel to `localhost:8000`**. CI secrets: `FSN1_DEPLOY_KEY`, `FSN1_HOST`,
+`FSN1_APP_UUID`.
+
+Box-level runbooks live in the private **`devli13/mission-control`** repo (`CLAUDE.md`,
+`docs/adding-a-project.md`, `docs/coolify-notes.md`, `docs/inventory.md`), which also
+ships a `vps` CLI (`bin/vps`) and a `vps` Claude skill.
+
+**Vercel is dashboard-only** (`proof-trading-bot-xi.vercel.app`, cron removed). Push to
+`main` auto-deploys the static dashboard + read-only API; it reads Supabase directly, so
+the move off Render did not touch it. Surfaces:
 
 | Route          | What                                                                 |
 | -------------- | ------------------------------------------------------------------- |
@@ -189,10 +204,12 @@ static dashboard + read-only API. Surfaces:
 
 - **ESM gotcha:** Vercel runs `api/` as un-bundled ESM, so **all relative imports use
   explicit `.js` extensions** or they fail with `ERR_MODULE_NOT_FOUND`.
-- The SDK submodule is fetched over **https** (Render + Vercel can clone it);
-  `postinstall` compiles it to `dist/`.
+- The SDK submodule is fetched over **https** (the Nixpacks build + Vercel can clone
+  it); `postinstall` compiles it to `dist/`.
 - For the worker, devDependencies (`tsx`) must be installed — don't set
-  `NODE_ENV=production` on Render.
+  `NODE_ENV=production`.
+- Coolify's **container health check is disabled** for this service: it shells
+  `curl`/`wget` inside the container and the slim image has neither.
 
 ## Writing a strategy
 
@@ -226,6 +243,7 @@ src/
   smoke.ts         end-to-end devnet smoke flow
   units.ts logger.ts faucet.ts commands.ts
 api/               Vercel functions: status + stats (read-only dashboard data)
-render.yaml        Render blueprint for the worker
+.github/workflows/deploy-fsn1.yml   push-to-main → Coolify deploy on the fsn1 box
+render.yaml        historical Render blueprint — no longer the deploy path
 vendor/trading-sdk git submodule — @proof/trading-sdk
 ```

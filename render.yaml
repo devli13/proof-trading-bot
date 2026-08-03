@@ -1,8 +1,16 @@
-# Render blueprint for the persistent multi-bot worker.
-# Create the service from this file, then set the two secret env vars
-# (DATABASE_URL, BOTS_ENC_KEY) in the Render dashboard — they are `sync: false`
-# so they are never committed. The bot roster lives in the Supabase registry
-# (`pnpm bots add ...`), so scaling bots needs NO redeploy.
+# HISTORICAL — this is NOT the deploy path any more. Kept as the record of the
+# worker's runtime shape; nothing here is applied.
+#
+# The persistent multi-bot worker now runs on the fsn1 Hetzner box under Coolify
+# (Nixpacks, no Dockerfile: `pnpm install` → `pnpm worker`); the Render service is
+# suspended. Deploys go push-to-main → .github/workflows/deploy-fsn1.yml, and both
+# the secrets and the non-secret env below live in Coolify's env store. See the
+# "Deploy" section of README.md.
+#
+# Still true off-Render: the tsx/NODE_ENV note below, and the fact that the bot
+# roster lives in the Supabase registry (`pnpm bots add ...`) so scaling bots needs
+# NO redeploy. Render-specific and dead: the region, the plan, and the
+# corepack/EROFS note.
 services:
   - type: worker
     name: proof-trading-bot-worker
@@ -33,7 +41,7 @@ services:
         value: "0"
       - key: LOG_LEVEL
         value: info
-      # Secrets — set in the Render dashboard, never committed:
+      # Secrets — were set in the Render dashboard, now in Coolify; never committed:
       - key: DATABASE_URL
         sync: false
       - key: BOTS_ENC_KEY
