@@ -97,9 +97,12 @@ export async function runWorker(): Promise<void> {
     }
 
     // Seed the explicitly-requested events (the union any bot lists by id), then refresh:
-    // with auto-discovery on, MarketData also probes every live event and reports which are
-    // Trading. "all" bots trade that live trading set, so newly-launched Proof markets are
-    // picked up automatically (no registry edit). Falls back to explicit / configured event.
+    // with auto-discovery on, MarketData probes live events and reports which are Trading.
+    // "all" bots trade exactly that live trading set — so newly-launched markets are picked up
+    // automatically, and NOTHING is traded when no event is live. We deliberately do NOT fall
+    // back to a hardcoded PROOF_IMPACT_EVENT: it goes stale as events resolve, and trading a
+    // resolved event is worse than trading nothing (the strategies' nearResolution guard +
+    // MarketData's staleness TTL are the belt-and-suspenders here).
     const explicit = new Set<number>();
     for (const s of usable) if (Array.isArray(s.markets)) s.markets.forEach((e) => explicit.add(e));
     marketData.setEvents(explicit.size ? Array.from(explicit) : [baseConfig.impactEvent]);
@@ -108,11 +111,16 @@ export async function runWorker(): Promise<void> {
     } catch (err) {
       logger.warn({ err: (err as Error).message }, "worker: market-data refresh failed during sync");
     }
-    const trading = marketData.tradingEvents();
-    const unionEvents = trading.length ? trading : explicit.size ? Array.from(explicit) : [baseConfig.impactEvent];
+    const unionEvents = marketData.tradingEvents(); // run set: Trading + pre-settlement grace ([] ⇒ "all" bots idle)
     const eventsKey = unionEvents.join(",");
     if (eventsKey !== lastEventsLog) {
-      logger.info({ tradingEvents: unionEvents, discovered: baseConfig.autoDiscoverEvents }, "worker: live trading events updated");
+      const prev = lastEventsLog ? lastEventsLog.split(",").filter(Boolean).map(Number) : [];
+      const added = unionEvents.filter((e) => !prev.includes(e));
+      const removed = prev.filter((e) => !unionEvents.includes(e));
+      // A removed event means its "all"-bot engines get rebuilt without it — surface at warn
+      // so a dropped market (and any position that should have flattened) is never silent.
+      if (removed.length) logger.warn({ removed, nowTrading: unionEvents }, "worker: events DROPPED from the run set (engines rebuilt without them)");
+      logger.info({ tradingEvents: unionEvents, added, removed, discovered: baseConfig.autoDiscoverEvents }, "worker: live trading events updated");
       lastEventsLog = eventsKey;
     }
 
